@@ -1,0 +1,1023 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Шиномонтаж PRO-шина · СТАБИЛЬНАЯ ВЕРСИЯ</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz@14..32&display=swap" rel="stylesheet">
+    <style>
+        /* Все стили из предыдущей версии */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Inter', sans-serif; background: #dbe7ec; padding: 15px; display: flex; justify-content: center; }
+        .container { max-width: 1800px; width: 100%; background: white; border-radius: 40px; box-shadow: 0 20px 40px -10px #1a414f; padding: 20px 25px; }
+        h1 { display: flex; align-items: center; gap: 12px; font-weight: 700; font-size: 1.8rem; color: #0b313b; margin-bottom: 5px; }
+        h1 small { font-size: 0.9rem; background: #fed7b0; padding: 4px 16px; border-radius: 40px; }
+        .work-schedule { background: #dff1f7; border-radius: 40px; padding: 8px 22px; margin: 8px 0 15px; display: flex; gap: 30px; font-weight: 600; font-size: 1rem; flex-wrap: wrap; }
+        .lunch-time { background: #ffd9b3; padding: 2px 12px; border-radius: 40px; color: #a64b00; font-weight: 700; }
+        .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 12px; }
+        .date-picker-bar { display: flex; align-items: center; gap: 12px; background: #f2f9ff; border-radius: 50px; padding: 5px 18px; border: 2px solid #b8d6e4; }
+        #datePicker { padding: 10px 20px; border: 2px solid #b0d0dc; border-radius: 40px; font-size: 1rem; background: white; cursor: pointer; }
+        .branch-selector { display: flex; gap: 10px; background: #f2f9ff; border-radius: 50px; padding: 5px; border: 2px solid #b8d6e4; }
+        .branch-btn { padding: 10px 24px; border-radius: 40px; font-weight: 700; font-size: 1rem; cursor: pointer; border: none; background: transparent; color: #12505e; transition: all 0.1s; }
+        .branch-btn.active { background: #1b6c7c; color: white; box-shadow: 0 4px 10px #0d4b58; }
+        .open-journal-btn { background: #1b6c7c; color: white; border: none; padding: 12px 28px; border-radius: 50px; font-weight: 700; font-size: 1.1rem; cursor: pointer; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 10px #0d4b58; }
+        .slots-header { display: flex; justify-content: space-between; align-items: center; margin: 8px 0 12px; }
+        .free-counter { background: #1b6c7c; color: white; padding: 8px 22px; border-radius: 50px; font-weight: 700; font-size: 1.1rem; }
+        .main-grid { display: grid; grid-template-columns: 2.4fr 1.2fr; gap: 22px; }
+        @media (max-width: 1400px) { .main-grid { grid-template-columns: 1fr; } }
+        .slots-panel { background: #f6fbfe; border-radius: 32px; padding: 18px; border: 2px solid #b8d6e4; }
+        .time-columns { display: flex; flex-direction: column; gap: 5px; }
+        .time-slot-row { display: flex; align-items: stretch; background: white; border-radius: 16px; border: 2px solid #c0dae7; overflow: hidden; min-height: 60px; }
+        .time-label { min-width: 85px; background: #cde5f0; font-weight: 700; font-size: 0.95rem; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #075260; border-right: 3px dashed #8fb9ca; padding: 3px; }
+        .time-label small { font-size: 0.65rem; font-weight: 500; }
+        .time-label.lunch { background: #ffcf9c; color: #a64b00; }
+        .cars-row { display: flex; flex: 1; }
+        .car-slot { flex: 1; min-width: 0; padding: 3px 1px; text-align: center; border-right: 2px solid #c9dee9; cursor: pointer; background: white; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; }
+        .car-slot:last-child { border-right: none; }
+        .car-slot.free:hover { background: #ffebd2; box-shadow: inset 0 0 0 2px #fd9e3e; }
+        .car-slot.occupied { cursor: pointer; }
+        .car-slot.occupied.ryabinina { background: #e0edf3; }
+        .car-slot.occupied.ammundsena { background: #f0e6d2; }
+        .car-slot.occupied.ammundsena.special-service { background: #d4e6f1; border-left: 4px solid #3c78a0; }
+        .slot-brand { font-size: 0.8rem; font-weight: 800; background: #fec89c; padding: 2px 1px; border-radius: 20px; width: 100%; text-align: center; border: 2px solid #f57c2e; line-height: 1.2; word-break: break-word; text-transform: uppercase; }
+        .slot-services { font-size: 0.6rem; color: #075260; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: rgba(255,255,255,0.7); padding: 1px 3px; border-radius: 20px; }
+        .car-slot.free .slot-brand { display: none; }
+        .car-slot.free .slot-services { display: none; }
+        .car-slot.occupied .slot-empty { display: none; }
+        .slot-empty { font-size: 0.85rem; font-weight: 700; color: #7b9eab; }
+        .entry-panel { background: #f2f8fc; border-radius: 32px; padding: 18px; border: 2px solid #b8d6e4; }
+        .selected-box { background: #deedf5; border-radius: 24px; padding: 14px; margin-bottom: 18px; border: 2px solid #8fc1d4; }
+        .selected-row { font-size: 1.1rem; font-weight: 600; margin-bottom: 6px; }
+        .selected-row span { background: #f6852b; color: white; padding: 4px 14px; border-radius: 50px; margin-left: 8px; font-size: 1rem; }
+        .form-group { margin-bottom: 14px; }
+        .form-group label { font-weight: 700; color: #12505e; font-size: 0.95rem; margin-bottom: 4px; display: block; }
+        .form-control { width: 100%; padding: 10px 16px; border: 2px solid #bed3e0; border-radius: 40px; font-size: 0.95rem; }
+        textarea.form-control { min-height: 60px; resize: vertical; }
+        .service-btns { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 10px; }
+        .service-btn { background: white; border: 2px solid #bed3e0; padding: 8px 12px; border-radius: 40px; font-weight: 600; font-size: 0.9rem; cursor: pointer; flex: 1 0 auto; transition: all 0.1s; }
+        .service-btn.selected { background: #ffcf9c; border-color: #ed8026; font-weight: 800; box-shadow: 0 0 0 2px #f57c2e; }
+        .service-btn.special { border-color: #3c78a0; background: #e8f0fe; }
+        .service-btn.special.selected { background: #9fc5e8; border-color: #1b6c7c; }
+        .selected-services { margin-top: 5px; font-size: 0.9rem; color: #075260; min-height: 24px; }
+        .size-selector { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 5px; }
+        .size-btn { background: white; border: 2px solid #bed3e0; padding: 6px 12px; border-radius: 40px; font-weight: 600; font-size: 0.9rem; cursor: pointer; min-width: 55px; text-align: center; }
+        .size-btn.selected { background: #ffcf9c; border-color: #ed8026; font-weight: 800; }
+        .primary-btn { background: #f6842a; border: none; color: white; font-weight: 800; font-size: 1.2rem; padding: 14px; width: 100%; border-radius: 60px; cursor: pointer; border-bottom: 4px solid #bd520f; margin-top: 15px; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,30,40,0.7); backdrop-filter: blur(5px); align-items: center; justify-content: center; z-index: 2000; }
+        .modal.show { display: flex; }
+        .modal-content { background: white; width: 95%; max-width: 1300px; max-height: 90vh; border-radius: 50px; padding: 25px; overflow: hidden; display: flex; flex-direction: column; }
+        .small-modal-content { background: white; width: 500px; max-width: 95%; border-radius: 40px; padding: 25px; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        .modal-header h2 { color: #124856; font-weight: 700; font-size: 1.8rem; }
+        .close-modal { background: none; border: none; font-size: 2.8rem; cursor: pointer; color: #4f7e8b; }
+        .journal-filter input { width: 100%; padding: 12px 20px; border-radius: 50px; border: 2px solid #bed3e0; font-size: 1rem; margin-bottom: 15px; }
+        .journal-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px; overflow-y: auto; }
+        .record-card { background: white; border-radius: 24px; padding: 16px; border-left: 6px solid #f6842a; border: 2px solid #d3e6f0; }
+        .card-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+        .goto-btn, .move-date-btn { flex: 1; padding: 6px 12px; border-radius: 30px; font-weight: 600; font-size: 0.9rem; cursor: pointer; border: none; }
+        .goto-btn { background: #1b6c7c; color: white; }
+        .move-date-btn { background: #fec89c; color: #2d1e0e; border: 2px solid #f57c2e; }
+        .delete-btn { background: none; border: 2px solid #e07b7b; color: #b13e3e; padding: 6px 12px; border-radius: 30px; font-weight: 600; cursor: pointer; width: 100%; margin-top: 8px; }
+        .detail-row { font-size: 1.1rem; margin: 10px 0; display: flex; gap: 12px; border-bottom: 1px solid #cde3f0; padding-bottom: 5px; }
+        .detail-label { font-weight: 700; color: #0b4d5a; min-width: 80px; }
+        .extra-comment { margin-top: 15px; padding-top: 10px; border-top: 2px dashed #8fc1d4; }
+        .extra-comment textarea { width: 100%; padding: 10px; border-radius: 20px; border: 2px solid #bed3e0; margin-top: 5px; font-family: 'Inter', sans-serif; }
+        .move-mode .car-slot.free { background: #c8e6c9; border: 3px solid #2e7d32; position: relative; }
+        .move-mode .car-slot.free:hover { background: #a5d6a7; transform: scale(1.02); z-index: 10; }
+        .move-mode .car-slot.free::after { content: "🔁 Перенести сюда"; position: absolute; top: -25px; background: #2e7d32; color: white; font-size: 0.8rem; padding: 2px 8px; border-radius: 20px; white-space: nowrap; }
+        .date-picker-modal { display: flex; gap: 10px; margin: 20px 0; align-items: center; }
+        .date-picker-modal input { flex: 1; padding: 12px; border: 2px solid #bed3e0; border-radius: 40px; font-size: 1rem; }
+        
+        .car-slot.selected-slot {
+            background: #ffe2be !important;
+            border: 3px solid #f47b20 !important;
+            box-shadow: 0 0 0 2px #f6842a;
+            position: relative;
+            z-index: 5;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>
+        Шиномонтаж PRO-шина
+        <small>СТАБИЛЬНАЯ ВЕРСИЯ</small>
+    </h1>
+    <div class="work-schedule">
+        <span>📅 Будни: 9:00 – 21:00</span>
+        <span>🎉 Выходные: 10:00 – 20:00</span>
+        <span class="lunch-time">🍽 Обед: 14:00 – 14:30</span>
+    </div>
+
+    <div class="top-bar">
+        <div class="date-picker-bar">
+            <span style="font-weight:700;">🗓 Дата:</span>
+            <input type="text" id="datePicker" placeholder="дд.мм.гггг" readonly>
+        </div>
+        
+        <div class="branch-selector" id="branchSelector">
+            <button class="branch-btn active" data-branch="ryabinina">🏠 Рябинина</button>
+            <button class="branch-btn" data-branch="ammundsena">🏭 Аммундсена</button>
+        </div>
+        
+        <button class="open-journal-btn" id="openJournalBtn">📋 Журнал записей</button>
+    </div>
+
+    <div class="slots-header">
+        <h3 style="font-size:1.4rem;">🕐 Выбор времени</h3>
+        <span class="free-counter" id="freeSlotsCount">0 свободно</span>
+    </div>
+
+    <div class="main-grid">
+        <div class="slots-panel">
+            <div class="time-columns" id="timeSlotsContainer"></div>
+        </div>
+
+        <div class="entry-panel">
+            <h3 style="font-size:1.4rem;">📝 Новая запись</h3>
+            <div class="selected-box">
+                <div class="selected-row">⏰ Время: <span id="selectedTimeDisplay">—</span></div>
+                <div class="selected-row">📅 Дата: <span id="selectedDateDisplay">—</span></div>
+                <div class="selected-row">🏢 Филиал: <span id="selectedBranchDisplay">Рябинина</span></div>
+            </div>
+
+            <div class="form-group">
+                <label>🔧 Услуги:</label>
+                <div class="service-btns" id="serviceButtons">
+                    <button class="service-btn" data-service="Комплекс">🔧 Комплекс</button>
+                    <button class="service-btn" data-service="СУ+Баланс">⚙️ СУ+Баланс</button>
+                    <button class="service-btn" data-service="Ремонт">🛠 Ремонт</button>
+                    <button class="service-btn" data-service="Правка">⛓ Правка</button>
+                    <button class="service-btn special" data-service="Слесарка" data-special="true">🔩 Слесарка</button>
+                    <button class="service-btn special" data-service="Кондиционер" data-special="true">❄️ Кондиционер</button>
+                </div>
+                <div id="selectedServicesDisplay" class="selected-services">✓ Выбрано: —</div>
+            </div>
+
+            <div class="form-group">
+                <label>📏 Размер колёс:</label>
+                <div class="size-selector" id="sizeSelector">
+                    <span class="size-btn" data-size="R13">R13</span>
+                    <span class="size-btn" data-size="R14">R14</span>
+                    <span class="size-btn" data-size="R15">R15</span>
+                    <span class="size-btn" data-size="R16">R16</span>
+                    <span class="size-btn" data-size="R17">R17</span>
+                    <span class="size-btn" data-size="R18">R18</span>
+                    <span class="size-btn" data-size="R19">R19</span>
+                    <span class="size-btn" data-size="R20">R20</span>
+                    <span class="size-btn" data-size="R21">R21</span>
+                    <span class="size-btn" data-size="R22">R22</span>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>🚗 Марка автомобиля</label>
+                <input type="text" id="carBrand" class="form-control" placeholder="Toyota, BMW..." style="text-transform: uppercase;">
+            </div>
+
+            <div class="form-group">
+                <label>👤 Имя клиента</label>
+                <input type="text" id="clientName" class="form-control" placeholder="Имя">
+            </div>
+
+            <div class="form-group">
+                <label>📞 Телефон</label>
+                <input type="tel" id="phoneNumber" class="form-control" placeholder="+7 (___) ___-__-__">
+            </div>
+
+            <div class="form-group">
+                <label>💬 Комментарий</label>
+                <textarea id="comment" class="form-control" placeholder="..."></textarea>
+            </div>
+
+            <button class="primary-btn" id="bookSlotBtn">✚ ЗАПИСАТЬ</button>
+            <div id="liveStatus" style="background:#dcf5e3; border-radius:40px; padding:10px; margin-top:12px; display:none;"></div>
+        </div>
+    </div>
+</div>
+
+<!-- МОДАЛЬНЫЕ ОКНА -->
+<div class="modal" id="journalModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>📋 Журнал записей</h2>
+            <button class="close-modal" id="closeJournalBtn">&times;</button>
+        </div>
+        <div class="journal-filter">
+            <input type="text" id="journalSearch" placeholder="Фильтр по имени, марке, телефону...">
+        </div>
+        <div id="journalCards" class="journal-cards"></div>
+        <div style="margin-top:15px;" id="journalCount"></div>
+    </div>
+</div>
+
+<div class="modal" id="moveDateModal">
+    <div class="small-modal-content">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <h2 style="color:#124856;">📅 Выберите новую дату</h2>
+            <button class="close-modal" id="closeMoveDateBtn" style="font-size:2.5rem;">&times;</button>
+        </div>
+        <div class="date-picker-modal">
+            <input type="text" id="moveDatePicker" placeholder="Выберите дату" readonly>
+        </div>
+        <p style="margin:15px 0; color:#075260;">После выбора даты, выберите свободный слот</p>
+        <button class="delete-btn" id="cancelMoveDateBtn">Отмена</button>
+    </div>
+</div>
+
+<div class="modal" id="detailModal">
+    <div class="small-modal-content">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h2 style="color:#124856;">📌 Детали записи</h2>
+            <button class="close-modal" id="closeDetailBtn" style="font-size:2.5rem;">&times;</button>
+        </div>
+        <div id="detailInfo"></div>
+        
+        <div class="extra-comment">
+            <label style="font-weight:700; color:#12505e;">📝 Дополнительный комментарий:</label>
+            <textarea id="extraCommentField" placeholder="Введите дополнительный комментарий..."></textarea>
+            <button class="delete-btn" id="saveExtraCommentBtn" style="margin-top:10px; background:#1b6c7c; color:white; border:2px solid #0d4b58;">💾 Сохранить комментарий</button>
+        </div>
+        
+        <button class="delete-btn" id="deleteFromDetailBtn" style="margin-top:15px;">✖ Удалить запись</button>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ru.js"></script>
+<script>
+    (function() {
+        flatpickr.localize(flatpickr.l10ns.ru);
+
+        // ========== ВАШ URL ==========
+        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzjBxrXbIwgSXmM990sEDzFj8L5rQvq6TJA8ZJ7GVjoJnk5F3P9yj-tE1jwy0N4gzud/exec';
+        // =============================
+
+        // --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
+        function formatPhone(value) {
+            const digits = value.replace(/\D/g, '');
+            let result = '+7';
+            if (digits.length > 1) result += ' (' + digits.substring(1, 4);
+            if (digits.length >= 5) result += ') ' + digits.substring(4, 7);
+            if (digits.length >= 8) result += '-' + digits.substring(7, 9);
+            if (digits.length >= 10) result += '-' + digits.substring(9, 11);
+            return result;
+        }
+        
+        document.getElementById('phoneNumber').addEventListener('input', function(e) {
+            let val = e.target.value;
+            if (!val.startsWith('+7')) val = '+7' + val.replace(/^\+?7?/, '');
+            e.target.value = formatPhone(val);
+        });
+
+        function capitalizeName(name) {
+            if (!name) return name;
+            return name.split(' ').map(word => {
+                if (word.length === 0) return word;
+                return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+            }).join(' ');
+        }
+
+        const clientNameInput = document.getElementById('clientName');
+        clientNameInput.addEventListener('blur', function() {
+            this.value = capitalizeName(this.value);
+        });
+
+        const carBrandInput = document.getElementById('carBrand');
+        carBrandInput.addEventListener('input', function() {
+            this.value = this.value.toUpperCase();
+        });
+
+        // --- ГЕНЕРАЦИЯ ВРЕМЕННЫХ СЛОТОВ ---
+        function getTimeSlotsForDate(date) {
+            if (!date) return [];
+            const d = new Date(date);
+            const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+            
+            let startHour = isWeekend ? 10 : 9;
+            let endHour = isWeekend ? 20 : 21;
+            
+            const slots = [];
+            for (let hour = startHour; hour < endHour; hour++) {
+                if (hour === 14) {
+                    slots.push(`${hour.toString().padStart(2,'0')}:30`);
+                } else {
+                    slots.push(`${hour.toString().padStart(2,'0')}:00`);
+                    slots.push(`${hour.toString().padStart(2,'0')}:30`);
+                }
+            }
+            return slots;
+        }
+
+        // --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ---
+        const CARS = ['1', '2', '3'];
+        let occupiedSlots = {};
+        let currentSelection = { date: null, time: null, carIndex: null, carLabel: null, slotKey: null };
+        let selectedServices = [];
+        let selectedSize = '';
+        let currentBranch = 'ryabinina';
+        let moveSourceKey = null;
+        let currentDetailSlotKey = null;
+
+        // Флаг для блокировки автообновления во время важных операций
+        let isUpdating = false;
+        let lastUpdateTime = 0;
+
+        // --- DOM ЭЛЕМЕНТЫ ---
+        const datePicker = document.getElementById('datePicker');
+        const slotsContainer = document.getElementById('timeSlotsContainer');
+        const freeSlotsSpan = document.getElementById('freeSlotsCount');
+        const selectedTimeSpan = document.getElementById('selectedTimeDisplay');
+        const selectedDateSpan = document.getElementById('selectedDateDisplay');
+        const selectedBranchSpan = document.getElementById('selectedBranchDisplay');
+        const phoneInput = document.getElementById('phoneNumber');
+        const commentInput = document.getElementById('comment');
+        const bookBtn = document.getElementById('bookSlotBtn');
+        const statusDiv = document.getElementById('liveStatus');
+        const serviceBtns = document.querySelectorAll('.service-btn');
+        const selectedServicesDisplay = document.getElementById('selectedServicesDisplay');
+        const sizeBtns = document.querySelectorAll('.size-btn');
+        const branchBtns = document.querySelectorAll('.branch-btn');
+
+        // --- МОДАЛЬНЫЕ ОКНА ---
+        const journalModal = document.getElementById('journalModal');
+        const openJournalBtn = document.getElementById('openJournalBtn');
+        const closeJournalBtn = document.getElementById('closeJournalBtn');
+        const journalCardsDiv = document.getElementById('journalCards');
+        const journalSearch = document.getElementById('journalSearch');
+        const journalCount = document.getElementById('journalCount');
+
+        const moveDateModal = document.getElementById('moveDateModal');
+        const closeMoveDateBtn = document.getElementById('closeMoveDateBtn');
+        const cancelMoveDateBtn = document.getElementById('cancelMoveDateBtn');
+        const moveDatePicker = document.getElementById('moveDatePicker');
+
+        const detailModal = document.getElementById('detailModal');
+        const closeDetailBtn = document.getElementById('closeDetailBtn');
+        const detailInfoDiv = document.getElementById('detailInfo');
+        const deleteFromDetailBtn = document.getElementById('deleteFromDetailBtn');
+        const extraCommentField = document.getElementById('extraCommentField');
+        const saveExtraCommentBtn = document.getElementById('saveExtraCommentBtn');
+
+        // --- ФУНКЦИИ UI ---
+        function updateServicesDisplay() {
+            selectedServicesDisplay.textContent = selectedServices.length ? 
+                '✓ Выбрано: ' + selectedServices.join(', ') : '✓ Выбрано: —';
+        }
+
+        function clearSelection() {
+            currentSelection = { date: null, time: null, carIndex: null, carLabel: null, slotKey: null };
+            selectedTimeSpan.textContent = '—';
+            selectedDateSpan.textContent = '—';
+        }
+
+        function exitMoveMode() {
+            moveSourceKey = null;
+            document.body.classList.remove('move-mode');
+        }
+
+        function showStatus(msg, type) {
+            statusDiv.style.display = 'block';
+            statusDiv.textContent = msg;
+            statusDiv.style.background = type === 'error' ? '#ffd9d9' : type === 'info' ? '#ffe5b4' : '#dcf5e3';
+            setTimeout(() => statusDiv.style.display = 'none', 3000);
+        }
+
+        // --- ОБРАБОТЧИКИ ---
+        serviceBtns.forEach(btn => {
+            btn.addEventListener('click', function() {
+                const service = this.dataset.service;
+                const index = selectedServices.indexOf(service);
+                
+                if (index === -1) {
+                    selectedServices.push(service);
+                    this.classList.add('selected');
+                } else {
+                    selectedServices.splice(index, 1);
+                    this.classList.remove('selected');
+                }
+                updateServicesDisplay();
+            });
+        });
+
+        sizeBtns.forEach(btn => {
+            btn.addEventListener('click', function() {
+                sizeBtns.forEach(b => b.classList.remove('selected'));
+                this.classList.add('selected');
+                selectedSize = this.dataset.size;
+            });
+        });
+
+        // --- ПЕРЕКЛЮЧЕНИЕ ФИЛИАЛОВ ---
+        branchBtns.forEach(btn => {
+            btn.addEventListener('click', function() {
+                branchBtns.forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                currentBranch = this.dataset.branch;
+                selectedBranchSpan.textContent = currentBranch === 'ryabinina' ? 'Рябинина' : 'Аммундсена';
+                
+                serviceBtns.forEach(btn => {
+                    if (btn.dataset.special === 'true') {
+                        btn.style.display = currentBranch === 'ammundsena' ? 'block' : 'none';
+                    }
+                });
+                
+                selectedServices = [];
+                serviceBtns.forEach(b => b.classList.remove('selected'));
+                updateServicesDisplay();
+                
+                if (datePicker.value) {
+                    renderSlotsForDate(datePicker.value);
+                }
+                clearSelection();
+            });
+        });
+
+        serviceBtns.forEach(btn => {
+            if (btn.dataset.special === 'true') btn.style.display = 'none';
+        });
+
+        // --- КАЛЕНДАРИ ---
+        flatpickr(datePicker, {
+            dateFormat: "Y-m-d",
+            defaultDate: new Date(),
+            locale: 'ru',
+            onChange: function(_, dateStr) { 
+                loadOccupiedFromServer(); 
+                clearSelection(); 
+            }
+        });
+
+        flatpickr(moveDatePicker, {
+            dateFormat: "Y-m-d",
+            locale: 'ru',
+            minDate: "today",
+            onChange: function(_, dateStr) {
+                if (moveSourceKey && dateStr) {
+                    moveDateModal.classList.remove('show');
+                    datePicker.value = dateStr;
+                    renderSlotsForDate(dateStr);
+                    document.body.classList.add('move-mode');
+                    showStatus(`🔁 Выберите свободный слот на ${dateStr}`, 'info');
+                }
+            }
+        });
+
+        // --- ФУНКЦИЯ ПРЕОБРАЗОВАНИЯ ДАТЫ ---
+        function parseDate(dateStr) {
+            if (!dateStr) return '';
+            
+            // Пробуем распарсить как дату
+            const d = new Date(dateStr);
+            if (!isNaN(d.getTime())) {
+                const year = d.getFullYear();
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            }
+            
+            // Если не получилось, возвращаем как есть
+            return dateStr;
+        }
+
+        function parseTime(timeStr) {
+            if (!timeStr) return '';
+            
+            const d = new Date(timeStr);
+            if (!isNaN(d.getTime())) {
+                const hours = String(d.getHours()).padStart(2, '0');
+                const minutes = String(d.getMinutes()).padStart(2, '0');
+                return `${hours}:${minutes}`;
+            }
+            
+            return timeStr;
+        }
+
+        // --- ЗАГРУЗКА ДАННЫХ ---
+        async function loadOccupiedFromServer() {
+            if (isUpdating) return;
+            
+            const now = Date.now();
+            if (now - lastUpdateTime < 2000) return; // Не чаще чем раз в 2 секунды
+            
+            try {
+                isUpdating = true;
+                const response = await fetch(APPS_SCRIPT_URL + '?_=' + now);
+                if (!response.ok) throw new Error('Ошибка сети');
+                
+                const data = await response.json();
+                
+                // Сохраняем текущий выбранный слот
+                const currentSlotKey = currentSelection.slotKey;
+                
+                // Перестраиваем объект с правильными ключами
+                const newOccupiedSlots = {};
+                
+                Object.entries(data).forEach(([key, value]) => {
+                    const parts = key.split('_');
+                    const branch = parts[0];
+                    let dateStr = parts[1];
+                    let timeStr = parts[2];
+                    const car = parts[3];
+                    
+                    // Пробуем получить правильные дату и время из original полей
+                    if (value.originalDate) {
+                        const d = new Date(value.originalDate);
+                        if (!isNaN(d.getTime())) {
+                            dateStr = d.getFullYear() + '-' + 
+                                     String(d.getMonth() + 1).padStart(2, '0') + '-' + 
+                                     String(d.getDate()).padStart(2, '0');
+                        }
+                    }
+                    
+                    if (value.originalTime) {
+                        const t = new Date(value.originalTime);
+                        if (!isNaN(t.getTime())) {
+                            timeStr = String(t.getHours()).padStart(2, '0') + ':' + 
+                                      String(t.getMinutes()).padStart(2, '0');
+                        }
+                    }
+                    
+                    const newKey = `${branch}_${dateStr}_${timeStr}_${car}`;
+                    newOccupiedSlots[newKey] = {
+                        ...value,
+                        branch: branch
+                    };
+                });
+                
+                occupiedSlots = newOccupiedSlots;
+                
+                if (datePicker.value) {
+                    renderSlotsForDate(datePicker.value);
+                    
+                    // Восстанавливаем выбор, если слот все еще свободен
+                    if (currentSlotKey && currentSelection.slotKey) {
+                        const slotElement = document.querySelector(`[data-slot-key="${currentSlotKey}"]`);
+                        if (slotElement && slotElement.classList.contains('free')) {
+                            slotElement.classList.add('selected-slot');
+                        }
+                    }
+                }
+                
+                renderJournal();
+                lastUpdateTime = Date.now();
+            } catch (error) {
+                console.error('Ошибка загрузки:', error);
+            } finally {
+                isUpdating = false;
+            }
+        }
+
+        // --- ОТПРАВКА ДАННЫХ ---
+        async function sendToServer(action, data) {
+            try {
+                isUpdating = true;
+                showStatus('⏳ Отправка...', 'info');
+                
+                const params = new URLSearchParams({ action, ...data, _: Date.now() });
+                const url = APPS_SCRIPT_URL + '?' + params.toString();
+                
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('Ошибка сети');
+                
+                const result = await response.json();
+                
+                if (result && typeof result === 'object' && !result.error) {
+                    // Перестраиваем полученные данные
+                    const newOccupiedSlots = {};
+                    Object.entries(result).forEach(([key, value]) => {
+                        const parts = key.split('_');
+                        const branch = parts[0];
+                        let dateStr = parts[1];
+                        let timeStr = parts[2];
+                        const car = parts[3];
+                        
+                        if (value.originalDate) {
+                            const d = new Date(value.originalDate);
+                            if (!isNaN(d.getTime())) {
+                                dateStr = d.getFullYear() + '-' + 
+                                         String(d.getMonth() + 1).padStart(2, '0') + '-' + 
+                                         String(d.getDate()).padStart(2, '0');
+                            }
+                        }
+                        
+                        if (value.originalTime) {
+                            const t = new Date(value.originalTime);
+                            if (!isNaN(t.getTime())) {
+                                timeStr = String(t.getHours()).padStart(2, '0') + ':' + 
+                                          String(t.getMinutes()).padStart(2, '0');
+                            }
+                        }
+                        
+                        const newKey = `${branch}_${dateStr}_${timeStr}_${car}`;
+                        newOccupiedSlots[newKey] = {
+                            ...value,
+                            branch: branch
+                        };
+                    });
+                    occupiedSlots = newOccupiedSlots;
+                    showStatus('✅ Данные сохранены', 'success');
+                } else if (result && result.error) {
+                    showStatus('❌ ' + result.error, 'error');
+                }
+                
+                if (datePicker.value) {
+                    renderSlotsForDate(datePicker.value);
+                }
+                
+                renderJournal();
+                
+            } catch (error) {
+                console.error('Ошибка отправки:', error);
+                showStatus('❌ Ошибка соединения', 'error');
+            } finally {
+                isUpdating = false;
+            }
+        }
+
+        // --- ОТРИСОВКА СЛОТОВ ---
+        function renderSlotsForDate(dateStr) {
+            if (!dateStr) return;
+            
+            // Сохраняем текущий выбранный ключ
+            const currentSlotKey = currentSelection.slotKey;
+            
+            slotsContainer.innerHTML = '';
+            const timeSlots = getTimeSlotsForDate(dateStr);
+            let freeCount = 0;
+
+            timeSlots.forEach(time => {
+                const isLunch = time === '14:00';
+                const row = document.createElement('div');
+                row.className = 'time-slot-row';
+                
+                const timeLabel = document.createElement('div');
+                timeLabel.className = `time-label ${isLunch ? 'lunch' : ''}`;
+                timeLabel.innerHTML = isLunch ? `${time}<br><small>Обед</small>` : time;
+                row.appendChild(timeLabel);
+
+                const carsDiv = document.createElement('div');
+                carsDiv.className = 'cars-row';
+
+                if (isLunch) {
+                    for (let i = 0; i < CARS.length; i++) {
+                        const emptySlot = document.createElement('div');
+                        emptySlot.className = 'car-slot occupied';
+                        emptySlot.style.background = '#ffcf9c';
+                        emptySlot.style.opacity = '0.7';
+                        emptySlot.style.cursor = 'not-allowed';
+                        emptySlot.innerHTML = `<span style="font-size:0.9rem;">🚫 Обед</span>`;
+                        carsDiv.appendChild(emptySlot);
+                    }
+                } else {
+                    CARS.forEach((car, idx) => {
+                        const slotKey = `${currentBranch}_${dateStr}_${time}_${car}`;
+                        const occ = occupiedSlots[slotKey];
+                        const slotDiv = document.createElement('div');
+                        
+                        let baseClass = 'car-slot';
+                        if (occ) {
+                            baseClass += ' occupied';
+                            baseClass += occ.branch === 'ryabinina' ? ' ryabinina' : ' ammundsena';
+                            if (occ.services && occ.branch === 'ammundsena') {
+                                const hasSpecial = occ.services.some(s => s === 'Слесарка' || s === 'Кондиционер');
+                                if (hasSpecial) baseClass += ' special-service';
+                            }
+                            
+                            slotDiv.innerHTML = `
+                                <span class="slot-brand">${occ.carBrand || '???'}</span>
+                                <span class="slot-services">${occ.services ? occ.services.join(', ') : ''}</span>
+                            `;
+                        } else {
+                            baseClass += ' free';
+                            freeCount++;
+                            slotDiv.innerHTML = `<span class="slot-empty">ПУСТО</span>`;
+                        }
+                        
+                        slotDiv.className = baseClass;
+                        slotDiv.dataset.time = time;
+                        slotDiv.dataset.car = car;
+                        slotDiv.dataset.carIndex = idx;
+                        slotDiv.dataset.slotKey = slotKey;
+
+                        if (occ) {
+                            slotDiv.addEventListener('click', () => {
+                                if (document.body.classList.contains('move-mode')) {
+                                    showStatus('❌ Нельзя выбрать занятый слот для переноса', 'error');
+                                    return;
+                                }
+                                currentDetailSlotKey = slotKey;
+                                const data = occupiedSlots[slotKey];
+                                detailInfoDiv.innerHTML = `
+                                    <div class="detail-row"><span class="detail-label">Филиал:</span><span>${data.branch === 'ryabinina' ? 'Рябинина' : 'Аммундсена'}</span></div>
+                                    <div class="detail-row"><span class="detail-label">Дата:</span><span>${dateStr}</span></div>
+                                    <div class="detail-row"><span class="detail-label">Время:</span><span>${time}</span></div>
+                                    <div class="detail-row"><span class="detail-label">Услуги:</span><span>${data.services ? data.services.join(', ') : ''} ${data.size || ''}</span></div>
+                                    <div class="detail-row"><span class="detail-label">Марка:</span><span>${data.carBrand || '—'}</span></div>
+                                    <div class="detail-row"><span class="detail-label">Имя:</span><span>${data.clientName || '—'}</span></div>
+                                    <div class="detail-row"><span class="detail-label">Телефон:</span><span>${data.phone || '—'}</span></div>
+                                    <div class="detail-row"><span class="detail-label">Коммент:</span><span>${data.comment || '—'}</span></div>
+                                `;
+                                extraCommentField.value = data.extraComment || '';
+                                detailModal.classList.add('show');
+                            });
+                        } else {
+                            slotDiv.addEventListener('click', () => {
+                                if (document.body.classList.contains('move-mode') && moveSourceKey) {
+                                    // Режим переноса
+                                    if (occupiedSlots[moveSourceKey]) {
+                                        const sourceData = occupiedSlots[moveSourceKey];
+                                        
+                                        // Отправляем на сервер
+                                        sendToServer('move', {
+                                            oldSlotKey: moveSourceKey,
+                                            newSlotKey: slotKey,
+                                            newBranch: currentBranch,
+                                            newDate: dateStr,
+                                            newTime: time,
+                                            newCar: car,
+                                            services: sourceData.services.join(','),
+                                            size: sourceData.size,
+                                            carBrand: sourceData.carBrand,
+                                            clientName: sourceData.clientName,
+                                            phone: sourceData.phone,
+                                            comment: sourceData.comment,
+                                            extraComment: sourceData.extraComment || ''
+                                        });
+                                        
+                                        // Оптимистичное обновление
+                                        occupiedSlots[slotKey] = { ...sourceData, branch: currentBranch };
+                                        delete occupiedSlots[moveSourceKey];
+                                        renderSlotsForDate(dateStr);
+                                        exitMoveMode();
+                                    }
+                                    return;
+                                }
+                                
+                                // Убираем подсветку со всех слотов
+                                document.querySelectorAll('.car-slot.free').forEach(s => s.classList.remove('selected-slot'));
+                                // Подсвечиваем выбранный слот
+                                slotDiv.classList.add('selected-slot');
+                                
+                                currentSelection = { date: dateStr, time, carIndex: idx, carLabel: car, slotKey };
+                                selectedTimeSpan.textContent = time;
+                                selectedDateSpan.textContent = dateStr;
+                            });
+                        }
+                        carsDiv.appendChild(slotDiv);
+                    });
+                }
+                row.appendChild(carsDiv);
+                slotsContainer.appendChild(row);
+            });
+            freeSlotsSpan.textContent = `🟢 ${freeCount} свободно`;
+            
+            // Восстанавливаем выбор
+            if (currentSlotKey) {
+                const slotElement = document.querySelector(`[data-slot-key="${currentSlotKey}"]`);
+                if (slotElement && slotElement.classList.contains('free')) {
+                    slotElement.classList.add('selected-slot');
+                }
+            }
+        }
+
+        // --- ЖУРНАЛ ---
+        function renderJournal() {
+            try {
+                const search = journalSearch.value.toLowerCase() || '';
+                const entries = Object.entries(occupiedSlots).map(([k,v]) => {
+                    const [branch, date, time, car] = k.split('_');
+                    return { 
+                        key: k, 
+                        branch, 
+                        date, 
+                        time, 
+                        car, 
+                        clientName: v.clientName || '',
+                        carBrand: v.carBrand || '',
+                        phone: v.phone || '',
+                        services: v.services || [],
+                        size: v.size || '',
+                        comment: v.comment || '',
+                        extraComment: v.extraComment || ''
+                    };
+                }).filter(e => {
+                    const clientMatch = e.clientName && e.clientName.toLowerCase().includes(search);
+                    const brandMatch = e.carBrand && e.carBrand.toLowerCase().includes(search);
+                    const phoneMatch = e.phone && e.phone.includes(search);
+                    return clientMatch || brandMatch || phoneMatch || search === '';
+                }).sort((a,b) => (a.date + a.time).localeCompare(b.date + b.time));
+
+                journalCardsDiv.innerHTML = entries.length ? '' : '<div style="padding:40px; text-align:center;">✖️ Нет записей</div>';
+                
+                entries.forEach(e => {
+                    const card = document.createElement('div');
+                    card.className = 'record-card';
+                    card.innerHTML = `
+                        <div><strong>🏢 ${e.branch === 'ryabinina' ? 'Рябинина' : 'Аммундсена'} | 📅 ${e.date} ⏰ ${e.time}</strong></div>
+                        <div>🔧 ${e.services ? e.services.join(', ') : ''} ${e.size || ''}</div>
+                        <div>👤 ${e.clientName || '—'}</div>
+                        <div>🚗 ${e.carBrand || '—'}</div>
+                        <div>📞 ${e.phone || '—'}</div>
+                        <div class="card-actions">
+                            <button class="goto-btn" data-slotkey="${e.key}">🔍 Перейти</button>
+                            <button class="move-date-btn" data-slotkey="${e.key}">📅 Перенести</button>
+                        </div>
+                        <button class="delete-btn" data-slotkey="${e.key}">✖ Удалить</button>
+                    `;
+                    journalCardsDiv.appendChild(card);
+                });
+
+                document.querySelectorAll('.goto-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const key = e.target.dataset.slotkey;
+                        const [branch, date, time, car] = key.split('_');
+                        
+                        const targetBranchBtn = document.querySelector(`.branch-btn[data-branch="${branch}"]`);
+                        if (targetBranchBtn) targetBranchBtn.click();
+                        
+                        datePicker.value = date;
+                        loadOccupiedFromServer();
+                        journalModal.classList.remove('show');
+                        
+                        setTimeout(() => {
+                            const slots = document.querySelectorAll('.car-slot.occupied');
+                            slots.forEach(slot => {
+                                if (slot.dataset.time === time && slot.dataset.car === car) {
+                                    slot.style.background = '#ffd9b3';
+                                    setTimeout(() => {
+                                        slot.style.background = '';
+                                    }, 2000);
+                                }
+                            });
+                        }, 300);
+                    });
+                });
+
+                document.querySelectorAll('.move-date-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        moveSourceKey = e.target.dataset.slotkey;
+                        journalModal.classList.remove('show');
+                        moveDateModal.classList.add('show');
+                    });
+                });
+
+                document.querySelectorAll('.delete-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const key = e.target.dataset.slotkey;
+                        if (confirm('Удалить запись?')) {
+                            sendToServer('delete', { slotKey: key });
+                        }
+                    });
+                });
+                
+                journalCount.textContent = `Всего: ${entries.length}`;
+                
+            } catch (error) {
+                console.error('Ошибка в renderJournal:', error);
+            }
+        }
+
+        // --- ОБРАБОТЧИК ЗАПИСИ ---
+        bookBtn.addEventListener('click', async () => {
+            const date = datePicker.value;
+            if (!date) return showStatus('❌ Выберите дату', 'error');
+            if (!currentSelection.time) return showStatus('❌ Выберите свободный слот', 'error');
+            if (selectedServices.length === 0) return showStatus('❌ Выберите услугу', 'error');
+            if (!selectedSize) return showStatus('❌ Выберите размер колёс', 'error');
+            const carBrand = carBrandInput.value.trim();
+            if (!carBrand) return showStatus('❌ Марка обязательна', 'error');
+
+            // Сохраняем ключ перед отправкой
+            const slotKey = currentSelection.slotKey;
+            
+            // Проверяем, не занят ли слот
+            if (occupiedSlots[slotKey]) {
+                return showStatus('❌ Слот только что заняли', 'error');
+            }
+
+            const clientName = capitalizeName(clientNameInput.value.trim());
+
+            // Оптимистичное обновление
+            occupiedSlots[slotKey] = {
+                services: [...selectedServices],
+                size: selectedSize,
+                carBrand: carBrand,
+                clientName: clientName,
+                phone: phoneInput.value.trim(),
+                comment: commentInput.value.trim(),
+                extraComment: '',
+                branch: currentBranch
+            };
+            renderSlotsForDate(date);
+
+            // Отправка на сервер
+            await sendToServer('new', {
+                branch: currentBranch,
+                date: date,
+                time: currentSelection.time,
+                car: currentSelection.carLabel,
+                services: selectedServices.join(','),
+                size: selectedSize,
+                carBrand: carBrand,
+                clientName: clientName,
+                phone: phoneInput.value.trim(),
+                comment: commentInput.value.trim()
+            });
+
+            // Сброс формы
+            clientNameInput.value = ''; 
+            carBrandInput.value = ''; 
+            phoneInput.value = ''; 
+            commentInput.value = '';
+            serviceBtns.forEach(b => b.classList.remove('selected'));
+            sizeBtns.forEach(b => b.classList.remove('selected'));
+            selectedServices = []; 
+            updateServicesDisplay(); 
+            selectedSize = ''; 
+            clearSelection();
+        });
+
+        // --- СОХРАНЕНИЕ КОММЕНТАРИЯ ---
+        saveExtraCommentBtn.addEventListener('click', async () => {
+            if (currentDetailSlotKey && occupiedSlots[currentDetailSlotKey]) {
+                const extraComment = extraCommentField.value;
+                occupiedSlots[currentDetailSlotKey].extraComment = extraComment;
+                await sendToServer('saveExtraComment', { 
+                    slotKey: currentDetailSlotKey, 
+                    extraComment: extraComment 
+                });
+                showStatus('✅ Комментарий сохранен', 'success');
+            }
+        });
+
+        // --- УДАЛЕНИЕ ---
+        deleteFromDetailBtn.addEventListener('click', () => {
+            if (currentDetailSlotKey && confirm('Удалить эту запись?')) {
+                sendToServer('delete', { slotKey: currentDetailSlotKey });
+                detailModal.classList.remove('show');
+                clearSelection();
+            }
+        });
+
+        // --- УПРАВЛЕНИЕ МОДАЛКАМИ ---
+        openJournalBtn.addEventListener('click', () => { 
+            renderJournal(); 
+            journalModal.classList.add('show'); 
+            exitMoveMode();
+        });
+        
+        closeJournalBtn.addEventListener('click', () => {
+            journalModal.classList.remove('show');
+            exitMoveMode();
+        });
+        
+        closeMoveDateBtn.addEventListener('click', () => {
+            moveDateModal.classList.remove('show');
+            exitMoveMode();
+        });
+        
+        cancelMoveDateBtn.addEventListener('click', () => {
+            moveDateModal.classList.remove('show');
+            exitMoveMode();
+        });
+        
+        closeDetailBtn.addEventListener('click', () => {
+            detailModal.classList.remove('show');
+            exitMoveMode();
+        });
+        
+        window.addEventListener('click', (e) => {
+            if (e.target === journalModal) {
+                journalModal.classList.remove('show');
+                exitMoveMode();
+            }
+            if (e.target === moveDateModal) {
+                moveDateModal.classList.remove('show');
+                exitMoveMode();
+            }
+            if (e.target === detailModal) {
+                detailModal.classList.remove('show');
+                exitMoveMode();
+            }
+        });
+        
+        journalSearch.addEventListener('input', renderJournal);
+
+        // --- АВТООБНОВЛЕНИЕ КАЖДЫЕ 5 СЕКУНД (для синхронизации) ---
+        setInterval(() => {
+            if (!isUpdating && !document.body.classList.contains('move-mode') && 
+                !journalModal.classList.contains('show') && !moveDateModal.classList.contains('show')) {
+                loadOccupiedFromServer();
+            }
+        }, 5000);
+
+        // --- ИНИЦИАЛИЗАЦИЯ ---
+        loadOccupiedFromServer();
+        selectedBranchSpan.textContent = 'Рябинина';
+
+    })();
+</script>
+</body>
+</html>
