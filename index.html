@@ -38,8 +38,8 @@
         .car-slot.free:hover { background: #ffebd2; box-shadow: inset 0 0 0 2px #fd9e3e; }
         .car-slot.occupied { cursor: pointer; }
         .car-slot.occupied.ryabinina { background: #e0edf3; }
-        .car-slot.occupied.ammundsena { background: #f0e6d2; }
-        .car-slot.occupied.ammundsena.special-service { background: #d4e6f1; border-left: 4px solid #3c78a0; }
+        .car-slot.occupied.amundsena { background: #f0e6d2; }
+        .car-slot.occupied.amundsena.special-service { background: #d4e6f1; border-left: 4px solid #3c78a0; }
         .slot-brand { font-size: 0.8rem; font-weight: 800; background: #fec89c; padding: 2px 1px; border-radius: 20px; width: 100%; text-align: center; border: 2px solid #f57c2e; line-height: 1.2; word-break: break-word; text-transform: uppercase; }
         .slot-services { font-size: 0.6rem; color: #075260; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: rgba(255,255,255,0.7); padding: 1px 3px; border-radius: 20px; }
         .car-slot.free .slot-brand { display: none; }
@@ -411,11 +411,11 @@
                 branchBtns.forEach(b => b.classList.remove('active'));
                 this.classList.add('active');
                 currentBranch = this.dataset.branch;
-                selectedBranchSpan.textContent = currentBranch === 'ryabinina' ? 'Рябинина' : 'Аммундсена';
+                selectedBranchSpan.textContent = currentBranch === 'ryabinina' ? 'Рябинина' : 'Амундсена';
                 
                 serviceBtns.forEach(btn => {
                     if (btn.dataset.special === 'true') {
-                        btn.style.display = currentBranch === 'ammundsena' ? 'block' : 'none';
+                        btn.style.display = currentBranch === 'amundsena' ? 'block' : 'none';
                     }
                 });
                 
@@ -569,8 +569,8 @@
                         let baseClass = 'car-slot';
                         if (occ) {
                             baseClass += ' occupied';
-                            baseClass += occ.branch === 'ryabinina' ? ' ryabinina' : ' ammundsena';
-                            if (occ.services && occ.branch === 'ammundsena') {
+                            baseClass += occ.branch === 'ryabinina' ? ' ryabinina' : ' amundsena';
+                            if (occ.services && occ.branch === 'amundsena') {
                                 const hasSpecial = occ.services.some(s => s === 'Слесарка' || s === 'Кондиционер');
                                 if (hasSpecial) baseClass += ' special-service';
                             }
@@ -600,7 +600,7 @@
                                 currentDetailSlotKey = slotKey;
                                 const data = occupiedSlots[slotKey];
                                 detailInfoDiv.innerHTML = `
-                                    <div class="detail-row"><span class="detail-label">Филиал:</span><span>${data.branch === 'ryabinina' ? 'Рябинина' : 'Аммундсена'}</span></div>
+                                    <div class="detail-row"><span class="detail-label">Филиал:</span><span>${data.branch === 'ryabinina' ? 'Рябинина' : 'Амундсена'}</span></div>
                                     <div class="detail-row"><span class="detail-label">Дата:</span><span>${dateStr}</span></div>
                                     <div class="detail-row"><span class="detail-label">Время:</span><span>${time}</span></div>
                                     <div class="detail-row"><span class="detail-label">Услуги:</span><span>${data.services ? data.services.join(', ') : ''} ${data.size || ''}</span></div>
@@ -698,7 +698,7 @@
                     const card = document.createElement('div');
                     card.className = 'record-card';
                     card.innerHTML = `
-                        <div><strong>🏢 ${e.branch === 'ryabinina' ? 'Рябинина' : 'Аммундсена'} | 📅 ${e.date} ⏰ ${e.time}</strong></div>
+                        <div><strong>🏢 ${e.branch === 'ryabinina' ? 'Рябинина' : 'Амундсена'} | 📅 ${e.date} ⏰ ${e.time}</strong></div>
                         <div>🔧 ${e.services ? e.services.join(', ') : ''} ${e.size || ''}</div>
                         <div>👤 ${e.clientName || '—'}</div>
                         <div>🚗 ${e.carBrand || '—'}</div>
