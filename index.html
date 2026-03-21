@@ -534,41 +534,44 @@
         }
 
         // --- ОТПРАВКА ДАННЫХ ---
-        async function sendToServer(action, data) {
-            try {
-                isUpdating = true;
-                showStatus('⏳ Отправка...', 'info');
-                
-                const params = new URLSearchParams({ action, ...data, _: Date.now() });
-                const url = APPS_SCRIPT_URL + '?' + params.toString();
-                
-                const response = await fetch(url);
-                if (!response.ok) throw new Error('Ошибка сети');
-                
-                const result = await response.json();
-                
-                if (result && typeof result === 'object' && !result.error) {
-                    occupiedSlots = result;
-                    showStatus('✅ Данные сохранены', 'success');
-                } else if (result && result.error) {
-                    showStatus('❌ ' + result.error, 'error');
-                } else {
-                    showStatus('✅ Данные отправлены', 'success');
-                    await loadOccupiedFromServer();
-                }
-                
-                if (datePicker.value) {
-                    renderSlotsForDate(datePicker.value);
-                }
-                renderJournal();
-                
-            } catch (error) {
-                console.error('Ошибка отправки:', error);
-                showStatus('❌ Ошибка соединения', 'error');
-            } finally {
-                isUpdating = false;
-            }
+async function sendToServer(action, data) {
+    try {
+        isUpdating = true;
+        showStatus('⏳ Отправка...', 'info');
+        
+        const params = new URLSearchParams({ action, ...data, _: Date.now() });
+        const url = APPS_SCRIPT_URL + '?' + params.toString();
+        
+        console.log('📤 Отправка:', action, data);
+        
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Ошибка сети');
+        
+        const result = await response.json();
+        console.log('📥 Ответ:', result);
+        
+        if (result && typeof result === 'object' && !result.error) {
+            occupiedSlots = result;
+            showStatus('✅ Данные сохранены', 'success');
+        } else if (result && result.error) {
+            showStatus('❌ ' + result.error, 'error');
+        } else {
+            showStatus('✅ Данные отправлены', 'success');
+            await loadOccupiedFromServer();
         }
+        
+        if (datePicker.value) {
+            renderSlotsForDate(datePicker.value);
+        }
+        renderJournal();
+        
+    } catch (error) {
+        console.error('❌ Ошибка отправки:', error);
+        showStatus('❌ Ошибка соединения', 'error');
+    } finally {
+        isUpdating = false;
+    }
+}
 
         // --- ОТРИСОВКА СЛОТОВ ---
         function renderSlotsForDate(dateStr) {
@@ -656,44 +659,51 @@
                                 detailModal.classList.add('show');
                             });
                         } else {
-                            slotDiv.addEventListener('click', (e) => {
-                                e.stopPropagation();
-                                if (document.body.classList.contains('move-mode') && moveSourceKey) {
-                                    if (occupiedSlots[moveSourceKey]) {
-                                        const sourceData = occupiedSlots[moveSourceKey];
-                                        
-                                        sendToServer('move', {
-                                            oldSlotKey: moveSourceKey,
-                                            newSlotKey: slotKey,
-                                            newBranch: currentBranch,
-                                            newDate: dateStr,
-                                            newTime: time,
-                                            newCar: car,
-                                            services: sourceData.services.join(','),
-                                            size: sourceData.size,
-                                            carBrand: sourceData.carBrand,
-                                            clientName: sourceData.clientName,
-                                            phone: sourceData.phone,
-                                            comment: sourceData.comment,
-                                            extraComment: sourceData.extraComment || '',
-                                            notificationMethod: sourceData.notificationMethod || 'whatsapp'
-                                        });
-                                        
-                                        occupiedSlots[slotKey] = { ...sourceData, branch: currentBranch };
-                                        delete occupiedSlots[moveSourceKey];
-                                        renderSlotsForDate(dateStr);
-                                        exitMoveMode();
-                                    }
-                                    return;
-                                }
-                                
-                                document.querySelectorAll('.car-slot.free').forEach(s => s.classList.remove('selected-slot'));
-                                slotDiv.classList.add('selected-slot');
-                                
-                                currentSelection = { date: dateStr, time, carIndex: idx, carLabel: car, slotKey };
-                                selectedTimeSpan.textContent = time;
-                                selectedDateSpan.textContent = dateStr;
-                            });
+slotDiv.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    
+    // РЕЖИМ ПЕРЕНОСА
+    if (document.body.classList.contains('move-mode') && moveSourceKey) {
+        if (occupiedSlots[moveSourceKey]) {
+            const sourceData = occupiedSlots[moveSourceKey];
+            
+            console.log('🔄 Перенос:', moveSourceKey, '→', slotKey);
+            
+            await sendToServer('move', {
+                oldSlotKey: moveSourceKey,
+                newSlotKey: slotKey,
+                newBranch: currentBranch,
+                newDate: dateStr,
+                newTime: time,
+                newCar: car,
+                services: sourceData.services ? sourceData.services.join(',') : '',
+                size: sourceData.size || '',
+                carBrand: sourceData.carBrand || '',
+                clientName: sourceData.clientName || '',
+                phone: sourceData.phone || '',
+                comment: sourceData.comment || '',
+                extraComment: sourceData.extraComment || '',
+                notificationMethod: sourceData.notificationMethod || 'whatsapp'
+            });
+            
+            // Оптимистичное обновление
+            occupiedSlots[slotKey] = { ...sourceData, branch: currentBranch };
+            delete occupiedSlots[moveSourceKey];
+            renderSlotsForDate(dateStr);
+            exitMoveMode();
+        }
+        return;
+    }
+    
+    // ОБЫЧНЫЙ ВЫБОР СЛОТА
+    document.querySelectorAll('.car-slot.free').forEach(s => s.classList.remove('selected-slot'));
+    slotDiv.classList.add('selected-slot');
+    
+    currentSelection = { date: dateStr, time, carIndex: idx, carLabel: car, slotKey };
+    selectedTimeSpan.textContent = time;
+    selectedDateSpan.textContent = dateStr;
+});
+
                         }
                         carsDiv.appendChild(slotDiv);
                     });
@@ -794,13 +804,18 @@
                         moveDateModal.classList.add('show');
                     });
                     
-                    card.querySelector('.delete-btn').addEventListener('click', async (ev) => {
-                        ev.stopPropagation();
-                        const key = ev.target.dataset.slotkey;
-                        if (confirm('Удалить запись?')) {
-                            await sendToServer('delete', { slotKey: key });
-                        }
-                    });
+card.querySelector('.delete-btn').addEventListener('click', async (ev) => {
+    ev.stopPropagation();
+    const key = ev.target.dataset.slotkey;
+    if (confirm('Удалить запись?')) {
+        console.log('🗑️ Удаление:', key);
+        await sendToServer('delete', { slotKey: key });
+        // Оптимистичное обновление
+        delete occupiedSlots[key];
+        renderSlotsForDate(datePicker.value);
+        renderJournal();
+    }
+});
                     
                     journalCardsDiv.appendChild(card);
                 });
@@ -868,25 +883,33 @@
             clearSelection();
         });
 
-        // --- СОХРАНЕНИЕ КОММЕНТАРИЯ ---
-        saveExtraCommentBtn.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            if (!currentDetailSlotKey) {
-                showStatus('❌ Нет выбранной записи', 'error');
-                return;
-            }
-            const comment = extraCommentField.value.trim();
-            if (!comment) {
-                showStatus('❌ Комментарий пуст', 'error');
-                return;
-            }
-            await sendToServer('saveExtraComment', { 
-                slotKey: currentDetailSlotKey, 
-                extraComment: comment 
-            });
-            detailModal.classList.remove('show');
-            showStatus('✅ Комментарий сохранён', 'success');
-        });
+       // СОХРАНЕНИЕ ДОПОЛНИТЕЛЬНОГО КОММЕНТАРИЯ
+saveExtraCommentBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (!currentDetailSlotKey) {
+        showStatus('❌ Нет выбранной записи', 'error');
+        return;
+    }
+    const comment = extraCommentField.value.trim();
+    if (!comment) {
+        showStatus('❌ Комментарий пуст', 'error');
+        return;
+    }
+    
+    console.log('💾 Сохраняем комментарий для:', currentDetailSlotKey, comment);
+    
+    await sendToServer('saveExtraComment', { 
+        slotKey: currentDetailSlotKey, 
+        extraComment: comment 
+    });
+    
+    // Обновляем локальные данные
+    if (occupiedSlots[currentDetailSlotKey]) {
+        occupiedSlots[currentDetailSlotKey].extraComment = comment;
+    }
+    
+    detailModal.classList.remove('show');
+    showStatus('✅ Комментарий сохранён', 'success');
 
         // --- УДАЛЕНИЕ ---
         deleteFromDetailBtn.addEventListener('click', async (e) => {
