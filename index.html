@@ -183,7 +183,19 @@
                 <label>📞 Телефон</label>
                 <input type="tel" id="phoneNumber" class="form-control" placeholder="+7 (___) ___-__-__">
             </div>
-
+            
+<div class="form-group">
+    <label>📱 Способ уведомления:</label>
+    <div style="display: flex; gap: 20px; margin-top: 8px;">
+        <label style="display: flex; align-items: center; gap: 8px;">
+            <input type="radio" name="notificationMethod" value="whatsapp" checked> WhatsApp
+        </label>
+        <label style="display: flex; align-items: center; gap: 8px;">
+            <input type="radio" name="notificationMethod" value="sms"> SMS
+        </label>
+    </div>
+    <small style="color: #666;">Выберите, куда получать напоминание</small>
+</div>
             <div class="form-group">
                 <label>💬 Комментарий</label>
                 <textarea id="comment" class="form-control" placeholder="..."></textarea>
