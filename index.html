@@ -828,28 +828,6 @@
             selectedSize = ''; 
             clearSelection();
         });
-        
-const notificationRadios = document.querySelectorAll('input[name="notificationMethod"]');
-const notificationOptions = document.querySelectorAll('.notification-option');
-
-function updateNotificationStyle() {
-    const selectedValue = document.querySelector('input[name="notificationMethod"]:checked').value;
-    notificationOptions.forEach(opt => {
-        opt.classList.remove('selected');
-    });
-    if (selectedValue === 'whatsapp') {
-        document.querySelector('.whatsapp-option').classList.add('selected');
-    } else {
-        document.querySelector('.sms-option').classList.add('selected');
-    }
-}
-
-notificationRadios.forEach(radio => {
-    radio.addEventListener('change', updateNotificationStyle);
-});
-
-// Устанавливаем начальное состояние
-updateNotificationStyle();
         // --- СОХРАНЕНИЕ КОММЕНТАРИЯ ---
         saveExtraCommentBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
@@ -923,7 +901,32 @@ updateNotificationStyle();
         });
         
         journalSearch.addEventListener('input', renderJournal);
-
+        
+// ========== ПЕРЕКЛЮЧЕНИЕ СТИЛЕЙ ДЛЯ КНОПОК УВЕДОМЛЕНИЯ ==========
+setTimeout(() => {
+    const notificationRadios = document.querySelectorAll('input[name="notificationMethod"]');
+    const notificationOptions = document.querySelectorAll('.notification-option');
+    
+    if (notificationRadios.length > 0) {
+        function updateNotificationStyle() {
+            const selectedValue = document.querySelector('input[name="notificationMethod"]:checked').value;
+            notificationOptions.forEach(opt => opt.classList.remove('selected'));
+            if (selectedValue === 'whatsapp') {
+                const whatsappOpt = document.querySelector('.whatsapp-option');
+                if (whatsappOpt) whatsappOpt.classList.add('selected');
+            } else {
+                const smsOpt = document.querySelector('.sms-option');
+                if (smsOpt) smsOpt.classList.add('selected');
+            }
+        }
+        
+        notificationRadios.forEach(radio => {
+            radio.addEventListener('change', updateNotificationStyle);
+        });
+        
+        updateNotificationStyle();
+    }
+}, 100);
         // --- АВТООБНОВЛЕНИЕ КАЖДЫЕ 5 СЕКУНД ---
         setInterval(() => {
             if (!isUpdating && !document.body.classList.contains('move-mode') && 
