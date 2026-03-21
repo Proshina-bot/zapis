@@ -321,32 +321,39 @@
 
         // --- ГЕНЕРАЦИЯ ВРЕМЕННЫХ СЛОТОВ ---
 function getTimeSlotsForDate(date) {
-    console.log('getTimeSlotsForDate получил:', date);
     if (!date) return [];
     
-    // Если дата пришла в формате YYYY-MM-DD, создаём объект Date
-    const d = new Date(date);
-    console.log('После new Date:', d);
+    // Парсим дату в формате YYYY-MM-DD
+    let year, month, day;
+    if (typeof date === 'string' && date.includes('-')) {
+        const parts = date.split('-');
+        year = parseInt(parts[0]);
+        month = parseInt(parts[1]) - 1;
+        day = parseInt(parts[2]);
+    } else {
+        const d = new Date(date);
+        year = d.getFullYear();
+        month = d.getMonth();
+        day = d.getDate();
+    }
     
+    const d = new Date(year, month, day);
     const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-    // ... остальной код
-}
-            
-            let startHour = isWeekend ? 10 : 9;
-            let endHour = isWeekend ? 20 : 21;
-            
-            const slots = [];
-            for (let hour = startHour; hour < endHour; hour++) {
-                if (hour === 14) {
-                    slots.push(`${hour.toString().padStart(2,'0')}:30`);
-                } else {
-                    slots.push(`${hour.toString().padStart(2,'0')}:00`);
-                    slots.push(`${hour.toString().padStart(2,'0')}:30`);
-                }
-            }
-            return slots;
+    
+    let startHour = isWeekend ? 10 : 9;
+    let endHour = isWeekend ? 20 : 21;
+    
+    const slots = [];
+    for (let hour = startHour; hour < endHour; hour++) {
+        if (hour === 14) {
+            slots.push(`${hour.toString().padStart(2,'0')}:30`);
+        } else {
+            slots.push(`${hour.toString().padStart(2,'0')}:00`);
+            slots.push(`${hour.toString().padStart(2,'0')}:30`);
         }
-
+    }
+    return slots;
+}
         // --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ---
         const CARS = ['1', '2', '3'];
         let occupiedSlots = {};
