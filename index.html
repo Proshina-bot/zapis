@@ -93,7 +93,22 @@
             background: #ffe2be !important;
             border: 3px solid #f47b20 !important;
             box-shadow: 0 0 0 2px #f6842a;
-        }
+}
+        .notification-option {
+            transition: all 0.2s ease;
+            cursor: pointer;
+}
+        .notification-option.selected {
+            transform: scale(1.02);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            border: 2px solid #ffffff !important;
+}
+        .whatsapp-option.selected {
+            background: #128C7E !important;
+}
+        .sms-option.selected {
+            background: #2E7D32 !important;
+}
     </style>
 </head>
 <body>
@@ -813,7 +828,28 @@
             selectedSize = ''; 
             clearSelection();
         });
+        
+const notificationRadios = document.querySelectorAll('input[name="notificationMethod"]');
+const notificationOptions = document.querySelectorAll('.notification-option');
 
+function updateNotificationStyle() {
+    const selectedValue = document.querySelector('input[name="notificationMethod"]:checked').value;
+    notificationOptions.forEach(opt => {
+        opt.classList.remove('selected');
+    });
+    if (selectedValue === 'whatsapp') {
+        document.querySelector('.whatsapp-option').classList.add('selected');
+    } else {
+        document.querySelector('.sms-option').classList.add('selected');
+    }
+}
+
+notificationRadios.forEach(radio => {
+    radio.addEventListener('change', updateNotificationStyle);
+});
+
+// Устанавливаем начальное состояние
+updateNotificationStyle();
         // --- СОХРАНЕНИЕ КОММЕНТАРИЯ ---
         saveExtraCommentBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
