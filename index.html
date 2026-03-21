@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Шиномонтаж PRO-шина · СТАБИЛЬНАЯ ВЕРСИЯ</title>
+    <title>Шиномонтаж PRO-шина · Запись с выбором уведомления</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz@14..32&display=swap" rel="stylesheet">
     <style>
-        /* Все стили без изменений */
+        /* ========== СТИЛИ (полностью из предыдущей версии) ========== */
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: 'Inter', sans-serif; background: #dbe7ec; padding: 15px; display: flex; justify-content: center; }
         .container { max-width: 1800px; width: 100%; background: white; border-radius: 40px; box-shadow: 0 20px 40px -10px #1a414f; padding: 20px 25px; }
@@ -38,8 +38,8 @@
         .car-slot.free:hover { background: #ffebd2; box-shadow: inset 0 0 0 2px #fd9e3e; }
         .car-slot.occupied { cursor: pointer; }
         .car-slot.occupied.ryabinina { background: #e0edf3; }
-        .car-slot.occupied.amundsena { background: #f0e6d2; }
-        .car-slot.occupied.amundsena.special-service { background: #d4e6f1; border-left: 4px solid #3c78a0; }
+        .car-slot.occupied.ammundsena { background: #f0e6d2; }
+        .car-slot.occupied.ammundsena.special-service { background: #d4e6f1; border-left: 4px solid #3c78a0; }
         .slot-brand { font-size: 0.8rem; font-weight: 800; background: #fec89c; padding: 2px 1px; border-radius: 20px; width: 100%; text-align: center; border: 2px solid #f57c2e; line-height: 1.2; word-break: break-word; text-transform: uppercase; }
         .slot-services { font-size: 0.6rem; color: #075260; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: rgba(255,255,255,0.7); padding: 1px 3px; border-radius: 20px; }
         .car-slot.free .slot-brand { display: none; }
@@ -183,19 +183,22 @@
                 <label>📞 Телефон</label>
                 <input type="tel" id="phoneNumber" class="form-control" placeholder="+7 (___) ___-__-__">
             </div>
-            
-<div class="form-group">
-    <label>📱 Способ уведомления:</label>
-    <div style="display: flex; gap: 20px; margin-top: 8px;">
-        <label style="display: flex; align-items: center; gap: 8px;">
-            <input type="radio" name="notificationMethod" value="whatsapp" checked> WhatsApp
-        </label>
-        <label style="display: flex; align-items: center; gap: 8px;">
-            <input type="radio" name="notificationMethod" value="sms"> SMS
-        </label>
-    </div>
-    <small style="color: #666;">Выберите, куда получать напоминание</small>
-</div>
+
+            <!-- ========== НОВЫЙ БЛОК ВЫБОРА УВЕДОМЛЕНИЯ ========== -->
+            <div class="form-group">
+                <label>📱 Способ уведомления:</label>
+                <div style="display: flex; gap: 20px; margin-top: 8px;">
+                    <label style="display: flex; align-items: center; gap: 8px;">
+                        <input type="radio" name="notificationMethod" value="whatsapp" checked> WhatsApp
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px;">
+                        <input type="radio" name="notificationMethod" value="sms"> SMS
+                    </label>
+                </div>
+                <small style="color: #666;">Выберите, куда получать напоминание о записи</small>
+            </div>
+            <!-- ================================================== -->
+
             <div class="form-group">
                 <label>💬 Комментарий</label>
                 <textarea id="comment" class="form-control" placeholder="..."></textarea>
@@ -260,11 +263,11 @@
     (function() {
         flatpickr.localize(flatpickr.l10ns.ru);
 
-        // ⚠️ ВСТАВЬТЕ СЮДА ВАШ URL ИЗ APP SCRIPT
-        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby8c3q7iu0FPf2R0u4OFETkLgvgUJMPMhNk08lBPlpQd-_-2VwBEbWYk5LgtVUNKR6l/exec';
-        // ==============================================
+        // ========== ВАШ URL ==========
+        const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/ВАШ_АКТУАЛЬНЫЙ_URL/exec';
+        // =============================
 
-        // --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
+        // --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (формат телефона, капитализация и т.д.) ---
         function formatPhone(value) {
             const digits = value.replace(/\D/g, '');
             let result = '+7';
@@ -397,7 +400,6 @@
             btn.addEventListener('click', function() {
                 const service = this.dataset.service;
                 const index = selectedServices.indexOf(service);
-                
                 if (index === -1) {
                     selectedServices.push(service);
                     this.classList.add('selected');
@@ -495,55 +497,45 @@
 
         // --- ОТПРАВКА ДАННЫХ ---
         async function sendToServer(action, data) {
-    try {
-        isUpdating = true;
-        showStatus('⏳ Отправка...', 'info');
-        
-        const params = new URLSearchParams({ action, ...data, _: Date.now() });
-        const url = APPS_SCRIPT_URL + '?' + params.toString();
-        
-        console.log('Отправка:', url); // для отладки
-        
-        const response = await fetch(url);
-        if (!response.ok) throw new Error('Ошибка сети');
-        
-        const result = await response.json();
-        console.log('Ответ сервера:', result); // для отладки
-        
-        if (result && typeof result === 'object' && !result.error) {
-            occupiedSlots = result;
-            showStatus('✅ Данные сохранены', 'success');
-        } else if (result && result.error) {
-            showStatus('❌ ' + result.error, 'error');
-            // при ошибке всё равно перезагружаем данные
-            const reload = await fetch(APPS_SCRIPT_URL + '?_=' + Date.now());
-            occupiedSlots = await reload.json();
-        } else {
-            // если ответ неожиданный, просто перезагружаем
-            const reload = await fetch(APPS_SCRIPT_URL + '?_=' + Date.now());
-            occupiedSlots = await reload.json();
+            try {
+                isUpdating = true;
+                showStatus('⏳ Отправка...', 'info');
+                
+                const params = new URLSearchParams({ action, ...data, _: Date.now() });
+                const url = APPS_SCRIPT_URL + '?' + params.toString();
+                
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('Ошибка сети');
+                
+                const result = await response.json();
+                
+                if (result && typeof result === 'object' && !result.error) {
+                    occupiedSlots = result;
+                    showStatus('✅ Данные сохранены', 'success');
+                } else if (result && result.error) {
+                    showStatus('❌ ' + result.error, 'error');
+                } else {
+                    showStatus('✅ Данные отправлены', 'success');
+                    await loadOccupiedFromServer();
+                }
+                
+                if (datePicker.value) {
+                    renderSlotsForDate(datePicker.value);
+                }
+                renderJournal();
+                
+            } catch (error) {
+                console.error('Ошибка отправки:', error);
+                showStatus('❌ Ошибка соединения', 'error');
+            } finally {
+                isUpdating = false;
+            }
         }
-        
-        if (datePicker.value) {
-            renderSlotsForDate(datePicker.value);
-        }
-        renderJournal();
-        
-    } catch (error) {
-        console.error('Ошибка отправки:', error);
-        showStatus('❌ Ошибка соединения', 'error');
-    } finally {
-        isUpdating = false;
-    }
-}
 
-        // --- ОТРИСОВКА СЛОТОВ ---
+        // --- ОТРИСОВКА СЛОТОВ (без изменений) ---
         function renderSlotsForDate(dateStr) {
             if (!dateStr) return;
-            
-            // Сохраняем текущий выбранный ключ
             const currentSlotKey = currentSelection.slotKey;
-            
             slotsContainer.innerHTML = '';
             const timeSlots = getTimeSlotsForDate(dateStr);
             let freeCount = 0;
@@ -573,7 +565,6 @@
                     }
                 } else {
                     CARS.forEach((car, idx) => {
-                        // КЛЮЧ ФОРМИРУЕТСЯ ПРАВИЛЬНО
                         const slotKey = `${currentBranch}_${dateStr}_${time}_${car}`;
                         const occ = occupiedSlots[slotKey];
                         const slotDiv = document.createElement('div');
@@ -586,7 +577,6 @@
                                 const hasSpecial = occ.services.some(s => s === 'Слесарка' || s === 'Кондиционер');
                                 if (hasSpecial) baseClass += ' special-service';
                             }
-                            
                             slotDiv.innerHTML = `
                                 <span class="slot-brand">${occ.carBrand || '???'}</span>
                                 <span class="slot-services">${occ.services ? occ.services.join(', ') : ''}</span>
@@ -620,18 +610,19 @@
                                     <div class="detail-row"><span class="detail-label">Имя:</span><span>${data.clientName || '—'}</span></div>
                                     <div class="detail-row"><span class="detail-label">Телефон:</span><span>${data.phone || '—'}</span></div>
                                     <div class="detail-row"><span class="detail-label">Коммент:</span><span>${data.comment || '—'}</span></div>
+                                    <div class="detail-row"><span class="detail-label">Уведомление:</span><span>${data.notificationMethod === 'whatsapp' ? 'WhatsApp' : 'SMS'}</span></div>
                                 `;
                                 extraCommentField.value = data.extraComment || '';
                                 detailModal.classList.add('show');
                             });
                         } else {
-                            slotDiv.addEventListener('click', async (e) => {
+                            slotDiv.addEventListener('click', (e) => {
                                 e.stopPropagation();
                                 if (document.body.classList.contains('move-mode') && moveSourceKey) {
                                     if (occupiedSlots[moveSourceKey]) {
                                         const sourceData = occupiedSlots[moveSourceKey];
                                         
-                                        await sendToServer('move', {
+                                        sendToServer('move', {
                                             oldSlotKey: moveSourceKey,
                                             newSlotKey: slotKey,
                                             newBranch: currentBranch,
@@ -644,9 +635,13 @@
                                             clientName: sourceData.clientName,
                                             phone: sourceData.phone,
                                             comment: sourceData.comment,
-                                            extraComment: sourceData.extraComment || ''
+                                            extraComment: sourceData.extraComment || '',
+                                            notificationMethod: sourceData.notificationMethod || 'whatsapp'
                                         });
                                         
+                                        occupiedSlots[slotKey] = { ...sourceData, branch: currentBranch };
+                                        delete occupiedSlots[moveSourceKey];
+                                        renderSlotsForDate(dateStr);
                                         exitMoveMode();
                                     }
                                     return;
@@ -668,7 +663,6 @@
             });
             freeSlotsSpan.textContent = `🟢 ${freeCount} свободно`;
             
-            // Восстанавливаем выбор
             if (currentSlotKey) {
                 const slotElement = document.querySelector(`[data-slot-key="${currentSlotKey}"]`);
                 if (slotElement && slotElement.classList.contains('free')) {
@@ -677,7 +671,7 @@
             }
         }
 
-        // --- ЖУРНАЛ ---
+        // --- ЖУРНАЛ (отображаем способ уведомления) ---
         function renderJournal() {
             try {
                 const search = journalSearch.value.toLowerCase() || '';
@@ -695,7 +689,8 @@
                         services: v.services || [],
                         size: v.size || '',
                         comment: v.comment || '',
-                        extraComment: v.extraComment || ''
+                        extraComment: v.extraComment || '',
+                        notificationMethod: v.notificationMethod || 'whatsapp'
                     };
                 }).filter(e => {
                     const clientMatch = e.clientName && e.clientName.toLowerCase().includes(search);
@@ -715,6 +710,7 @@
                         <div>👤 ${e.clientName || '—'}</div>
                         <div>🚗 ${e.carBrand || '—'}</div>
                         <div>📞 ${e.phone || '—'}</div>
+                        <div>📱 Уведомление: ${e.notificationMethod === 'whatsapp' ? 'WhatsApp' : 'SMS'}</div>
                         <div class="card-actions">
                             <button class="goto-btn" data-slotkey="${e.key}">🔍 Перейти</button>
                             <button class="move-date-btn" data-slotkey="${e.key}">📅 Перенести</button>
@@ -782,13 +778,28 @@
             if (!carBrand) return showStatus('❌ Марка обязательна', 'error');
 
             const slotKey = currentSelection.slotKey;
-            
             if (occupiedSlots[slotKey]) {
                 return showStatus('❌ Слот только что заняли', 'error');
             }
 
             const clientName = capitalizeName(clientNameInput.value.trim());
+            const notificationMethod = document.querySelector('input[name="notificationMethod"]:checked').value;
 
+            // Оптимистичное обновление
+            occupiedSlots[slotKey] = {
+                services: [...selectedServices],
+                size: selectedSize,
+                carBrand: carBrand,
+                clientName: clientName,
+                phone: phoneInput.value.trim(),
+                comment: commentInput.value.trim(),
+                extraComment: '',
+                branch: currentBranch,
+                notificationMethod: notificationMethod
+            };
+            renderSlotsForDate(date);
+
+            // Отправка на сервер
             await sendToServer('new', {
                 branch: currentBranch,
                 date: date,
@@ -799,9 +810,11 @@
                 carBrand: carBrand,
                 clientName: clientName,
                 phone: phoneInput.value.trim(),
-                comment: commentInput.value.trim()
+                comment: commentInput.value.trim(),
+                notificationMethod: notificationMethod
             });
 
+            // Сброс формы
             clientNameInput.value = ''; 
             carBrandInput.value = ''; 
             phoneInput.value = ''; 
