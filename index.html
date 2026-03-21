@@ -566,72 +566,85 @@
         }
 
         // --- ОТРИСОВКА СЛОТОВ (ВАША, БЕЗ ИЗМЕНЕНИЙ) ---
-        function renderSlotsForDate(dateStr) {
-            if (!dateStr) return;
-            const currentSlotKey = currentSelection.slotKey;
-            slotsContainer.innerHTML = '';
-            const timeSlots = getTimeSlotsForDate(dateStr);
-            let freeCount = 0;
+function renderSlotsForDate(dateStr) {
+    if (!dateStr) return;
+    
+    slotsContainer.innerHTML = '';
+    const timeSlots = getTimeSlotsForDate(dateStr);
+    let freeCount = 0;
 
-            timeSlots.forEach(time => {
-                const isLunch = time === '14:00';
-                const row = document.createElement('div');
-                row.className = 'time-slot-row';
+    timeSlots.forEach(time => {
+        const isLunch = time === '14:00';
+        const row = document.createElement('div');
+        row.className = 'time-slot-row';
+        
+        const timeLabel = document.createElement('div');
+        timeLabel.className = `time-label ${isLunch ? 'lunch' : ''}`;
+        timeLabel.innerHTML = isLunch ? `${time}<br><small>Обед</small>` : time;
+        row.appendChild(timeLabel);
+
+        const carsDiv = document.createElement('div');
+        carsDiv.className = 'cars-row';
+
+        if (isLunch) {
+            for (let i = 0; i < CARS.length; i++) {
+                const emptySlot = document.createElement('div');
+                emptySlot.className = 'car-slot occupied';
+                emptySlot.style.background = '#ffcf9c';
+                emptySlot.style.opacity = '0.7';
+                emptySlot.style.cursor = 'not-allowed';
+                emptySlot.innerHTML = `<span style="font-size:0.9rem;">🚫 Обед</span>`;
+                carsDiv.appendChild(emptySlot);
+            }
+        } else {
+            CARS.forEach((car, idx) => {
+                // НОРМАЛИЗУЕМ КЛЮЧ: ищем и с ведущим нулём, и без него
+                let slotKey = `${currentBranch}_${dateStr}_${time}_${car}`;
+                let occ = occupiedSlots[slotKey];
                 
-                const timeLabel = document.createElement('div');
-                timeLabel.className = `time-label ${isLunch ? 'lunch' : ''}`;
-                timeLabel.innerHTML = isLunch ? `${time}<br><small>Обед</small>` : time;
-                row.appendChild(timeLabel);
-
-                const carsDiv = document.createElement('div');
-                carsDiv.className = 'cars-row';
-
-                if (isLunch) {
-                    for (let i = 0; i < CARS.length; i++) {
-                        const emptySlot = document.createElement('div');
-                        emptySlot.className = 'car-slot occupied';
-                        emptySlot.style.background = '#ffcf9c';
-                        emptySlot.style.opacity = '0.7';
-                        emptySlot.style.cursor = 'not-allowed';
-                        emptySlot.innerHTML = `<span style="font-size:0.9rem;">🚫 Обед</span>`;
-                        carsDiv.appendChild(emptySlot);
+                // Если не нашли, пробуем без ведущего нуля
+                if (!occ && time.startsWith('0')) {
+                    const timeNoZero = time.substring(1);
+                    const altKey = `${currentBranch}_${dateStr}_${timeNoZero}_${car}`;
+                    occ = occupiedSlots[altKey];
+                    if (occ) slotKey = altKey;
+                }
+                
+                const slotDiv = document.createElement('div');
+                let baseClass = 'car-slot';
+                
+                if (occ) {
+                    baseClass += ' occupied';
+                    baseClass += occ.branch === 'ryabinina' ? ' ryabinina' : ' amundsena';
+                    if (occ.services && occ.branch === 'amundsena') {
+                        const hasSpecial = occ.services.some(s => s === 'Слесарка' || s === 'Кондиционер');
+                        if (hasSpecial) baseClass += ' special-service';
                     }
+                    slotDiv.innerHTML = `
+                        <span class="slot-brand">${occ.carBrand || '???'}</span>
+                        <span class="slot-services">${occ.services ? occ.services.join(', ') : ''}</span>
+                    `;
                 } else {
-                    CARS.forEach((car, idx) => {
-                        const slotKey = `${currentBranch}_${dateStr}_${time}_${car}`;
-                        const occ = occupiedSlots[slotKey];
-                        const slotDiv = document.createElement('div');
-                        
-                        let baseClass = 'car-slot';
-                        if (occ) {
-                            baseClass += ' occupied';
-                            baseClass += occ.branch === 'ryabinina' ? ' ryabinina' : ' amundsena';
-                            if (occ.services && occ.branch === 'amundsena') {
-                                const hasSpecial = occ.services.some(s => s === 'Слесарка' || s === 'Кондиционер');
-                                if (hasSpecial) baseClass += ' special-service';
-                            }
-                            slotDiv.innerHTML = `
-                                <span class="slot-brand">${occ.carBrand || '???'}</span>
-                                <span class="slot-services">${occ.services ? occ.services.join(', ') : ''}</span>
-                            `;
-                        } else {
-                            baseClass += ' free';
-                            freeCount++;
-                            slotDiv.innerHTML = `<span class="slot-empty">ПУСТО</span>`;
-                        }
-                        
-                        slotDiv.className = baseClass;
-                        slotDiv.dataset.time = time;
-                        slotDiv.dataset.car = car;
-                        slotDiv.dataset.carIndex = idx;
-                        slotDiv.dataset.slotKey = slotKey;
+                    baseClass += ' free';
+                    freeCount++;
+                    slotDiv.innerHTML = `<span class="slot-empty">ПУСТО</span>`;
+                }
+                
+                slotDiv.className = baseClass;
+                slotDiv.dataset.time = time;
+                slotDiv.dataset.car = car;
+                slotDiv.dataset.carIndex = idx;
+                slotDiv.dataset.slotKey = slotKey;
 
-                        if (occ) {
-                            slotDiv.addEventListener('click', () => {
-                                if (document.body.classList.contains('move-mode')) {
-                                    showStatus('❌ Нельзя выбрать занятый слот для переноса', 'error');
-                                    return;
-                                }
+                // ... остальные обработчики
+                carsDiv.appendChild(slotDiv);
+            });
+        }
+        row.appendChild(carsDiv);
+        slotsContainer.appendChild(row);
+    });
+    freeSlotsSpan.textContent = `🟢 ${freeCount} свободно`;
+}
                                 currentDetailSlotKey = slotKey;
                                 const data = occupiedSlots[slotKey];
                                 detailInfoDiv.innerHTML = `
