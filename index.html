@@ -650,29 +650,30 @@
                         } else {
                             slotDiv.addEventListener('click', async (e) => {
                                 e.stopPropagation();
-                                if (document.body.classList.contains('move-mode') && moveSourceKey) {
-                                    if (occupiedSlots[moveSourceKey]) {
-                                        const sourceData = occupiedSlots[moveSourceKey];
-                                        await sendToServer('move', {
-                                            oldSlotKey: moveSourceKey,
-                                            newSlotKey: slotKey,
-                                            newBranch: currentBranch,
-                                            newDate: dateStr,
-                                            newTime: time,
-                                            newCar: car,
-                                            services: sourceData.services.join(','),
-                                            size: sourceData.size,
-                                            carBrand: sourceData.carBrand,
-                                            clientName: sourceData.clientName,
-                                            phone: sourceData.phone,
-                                            comment: sourceData.comment,
-                                            extraComment: sourceData.extraComment || '',
-                                            notificationMethod: sourceData.notificationMethod || 'whatsapp'
-                                        });
-                                        exitMoveMode();
-                                    }
-                                    return;
-                                }
+                              if (document.body.classList.contains('move-mode') && moveSourceKey) {
+    if (occupiedSlots[moveSourceKey]) {
+        const sourceData = occupiedSlots[moveSourceKey];
+        
+        await sendToServer('move', {
+            oldSlotKey: moveSourceKey,
+            newSlotKey: slotKey,
+            newBranch: currentBranch,
+            newDate: dateStr,
+            newTime: time,
+            newCar: car,
+            services: sourceData.services.join(','),
+            size: sourceData.size,
+            carBrand: sourceData.carBrand,
+            clientName: sourceData.clientName,
+            phone: sourceData.phone,
+            comment: sourceData.comment,
+            extraComment: sourceData.extraComment || '',
+            notificationMethod: sourceData.notificationMethod || 'whatsapp'  // ← ЭТО ВАЖНО!
+        });
+        exitMoveMode();
+    }
+    return;
+}
                                 
                                 document.querySelectorAll('.car-slot.free').forEach(s => s.classList.remove('selected-slot'));
                                 slotDiv.classList.add('selected-slot');
