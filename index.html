@@ -320,10 +320,17 @@
         });
 
         // --- ГЕНЕРАЦИЯ ВРЕМЕННЫХ СЛОТОВ ---
-        function getTimeSlotsForDate(date) {
-            if (!date) return [];
-            const d = new Date(date);
-            const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+function getTimeSlotsForDate(date) {
+    console.log('getTimeSlotsForDate получил:', date);
+    if (!date) return [];
+    
+    // Если дата пришла в формате YYYY-MM-DD, создаём объект Date
+    const d = new Date(date);
+    console.log('После new Date:', d);
+    
+    const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+    // ... остальной код
+}
             
             let startHour = isWeekend ? 10 : 9;
             let endHour = isWeekend ? 20 : 21;
@@ -483,15 +490,16 @@
         });
 
         // --- КАЛЕНДАРИ (ВАШИ) ---
-        flatpickr(datePicker, {
-            dateFormat: "Y-m-d",
-            defaultDate: new Date(),
-            locale: 'ru',
-            onChange: function(_, dateStr) { 
-                loadOccupiedFromServer(); 
-                clearSelection(); 
-            }
-        });
+flatpickr(datePicker, {
+    dateFormat: "Y-m-d",
+    defaultDate: new Date(),
+    locale: 'ru',
+    onChange: function(selectedDates, dateStr) { 
+        console.log('Дата выбрана:', dateStr);
+        loadOccupiedFromServer(); 
+        clearSelection(); 
+    }
+});
 
         flatpickr(moveDatePicker, {
             dateFormat: "Y-m-d",
