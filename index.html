@@ -195,21 +195,16 @@
             </div>
 <!-- СПОСОБ УВЕДОМЛЕНИЯ (увеличенный) -->
 <div class="form-group">
-    <label style="font-size: 1.1rem; margin-bottom: 10px;">📢 Способ уведомления:</label>
-    <div style="display: flex; gap: 15px; margin-top: 8px;">
-        <label style="flex: 1; cursor: pointer;">
-            <input type="radio" name="notificationMethod" value="whatsapp" checked style="display: none;">
-            <div style="background: #25D366; color: white; text-align: center; padding: 12px 0; border-radius: 50px; font-weight: 700; font-size: 1.1rem; transition: 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border: 2px solid transparent;" class="notification-option whatsapp-option">
-                💬 WhatsApp
-            </div>
-        </label>
-        <label style="flex: 1; cursor: pointer;">
-            <input type="radio" name="notificationMethod" value="sms" style="display: none;">
-            <div style="background: #4CAF50; color: white; text-align: center; padding: 12px 0; border-radius: 50px; font-weight: 700; font-size: 1.1rem; transition: 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border: 2px solid transparent;" class="notification-option sms-option">
-                📱 SMS
-            </div>
-        </label>
+    <label style="font-size: 1.1rem; margin-bottom: 10px; display: block;">📢 Способ уведомления:</label>
+    <div style="display: flex; gap: 15px;">
+        <button type="button" id="notifyWhatsappBtn" style="flex: 1; background: #25D366; color: white; text-align: center; padding: 12px 0; border-radius: 50px; font-weight: 700; font-size: 1.1rem; border: none; cursor: pointer; transition: 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" class="notification-btn whatsapp-btn">
+            💬 WhatsApp
+        </button>
+        <button type="button" id="notifySmsBtn" style="flex: 1; background: #4CAF50; color: white; text-align: center; padding: 12px 0; border-radius: 50px; font-weight: 700; font-size: 1.1rem; border: none; cursor: pointer; transition: 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" class="notification-btn sms-btn">
+            📱 SMS
+        </button>
     </div>
+    <input type="hidden" id="notificationMethod" value="whatsapp">
 </div>
             <div class="form-group">
                 <label>📞 Телефон</label>
@@ -901,32 +896,34 @@
         });
         
         journalSearch.addEventListener('input', renderJournal);
-        
-// ========== ПЕРЕКЛЮЧЕНИЕ СТИЛЕЙ ДЛЯ КНОПОК УВЕДОМЛЕНИЯ ==========
-setTimeout(() => {
-    const notificationRadios = document.querySelectorAll('input[name="notificationMethod"]');
-    const notificationOptions = document.querySelectorAll('.notification-option');
+// ========== УПРАВЛЕНИЕ КНОПКАМИ УВЕДОМЛЕНИЯ ==========
+const notifyWhatsappBtn = document.getElementById('notifyWhatsappBtn');
+const notifySmsBtn = document.getElementById('notifySmsBtn');
+const notificationMethodInput = document.getElementById('notificationMethod');
+
+function setNotificationMethod(method) {
+    notificationMethodInput.value = method;
     
-    if (notificationRadios.length > 0) {
-        function updateNotificationStyle() {
-            const selectedValue = document.querySelector('input[name="notificationMethod"]:checked').value;
-            notificationOptions.forEach(opt => opt.classList.remove('selected'));
-            if (selectedValue === 'whatsapp') {
-                const whatsappOpt = document.querySelector('.whatsapp-option');
-                if (whatsappOpt) whatsappOpt.classList.add('selected');
-            } else {
-                const smsOpt = document.querySelector('.sms-option');
-                if (smsOpt) smsOpt.classList.add('selected');
-            }
-        }
-        
-        notificationRadios.forEach(radio => {
-            radio.addEventListener('change', updateNotificationStyle);
-        });
-        
-        updateNotificationStyle();
+    // Стили для кнопок
+    if (method === 'whatsapp') {
+        notifyWhatsappBtn.style.background = '#128C7E';
+        notifyWhatsappBtn.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2)';
+        notifySmsBtn.style.background = '#4CAF50';
+        notifySmsBtn.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+    } else {
+        notifyWhatsappBtn.style.background = '#25D366';
+        notifyWhatsappBtn.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+        notifySmsBtn.style.background = '#2E7D32';
+        notifySmsBtn.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2)';
     }
-}, 100);
+}
+
+notifyWhatsappBtn.addEventListener('click', () => setNotificationMethod('whatsapp'));
+notifySmsBtn.addEventListener('click', () => setNotificationMethod('sms'));
+
+// Устанавливаем начальное значение
+setNotificationMethod('whatsapp');
+        
         // --- АВТООБНОВЛЕНИЕ КАЖДЫЕ 5 СЕКУНД ---
         setInterval(() => {
             if (!isUpdating && !document.body.classList.contains('move-mode') && 
