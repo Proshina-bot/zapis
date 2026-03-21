@@ -178,7 +178,24 @@
                 <label>👤 Имя клиента</label>
                 <input type="text" id="clientName" class="form-control" placeholder="Имя">
             </div>
-
+<!-- СПОСОБ УВЕДОМЛЕНИЯ (увеличенный) -->
+<div class="form-group">
+    <label style="font-size: 1.1rem; margin-bottom: 10px;">📢 Способ уведомления:</label>
+    <div style="display: flex; gap: 15px; margin-top: 8px;">
+        <label style="flex: 1; cursor: pointer;">
+            <input type="radio" name="notificationMethod" value="whatsapp" checked style="display: none;">
+            <div style="background: #25D366; color: white; text-align: center; padding: 12px 0; border-radius: 50px; font-weight: 700; font-size: 1.1rem; transition: 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border: 2px solid transparent;" class="notification-option whatsapp-option">
+                💬 WhatsApp
+            </div>
+        </label>
+        <label style="flex: 1; cursor: pointer;">
+            <input type="radio" name="notificationMethod" value="sms" style="display: none;">
+            <div style="background: #4CAF50; color: white; text-align: center; padding: 12px 0; border-radius: 50px; font-weight: 700; font-size: 1.1rem; transition: 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border: 2px solid transparent;" class="notification-option sms-option">
+                📱 SMS
+            </div>
+        </label>
+    </div>
+</div>
             <div class="form-group">
                 <label>📞 Телефон</label>
                 <input type="tel" id="phoneNumber" class="form-control" placeholder="+7 (___) ___-__-__">
@@ -188,20 +205,6 @@
                 <label>💬 Комментарий</label>
                 <textarea id="comment" class="form-control" placeholder="..."></textarea>
             </div>
-
-            <!-- СПОСОБ УВЕДОМЛЕНИЯ -->
-            <div class="form-group">
-                <label>📢 Способ уведомления:</label>
-                <div style="display: flex; gap: 20px; margin-top: 8px;">
-                    <label style="display: flex; align-items: center; gap: 6px;">
-                        <input type="radio" name="notificationMethod" value="whatsapp" checked> WhatsApp
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 6px;">
-                        <input type="radio" name="notificationMethod" value="sms"> SMS
-                    </label>
-                </div>
-            </div>
-
             <button class="primary-btn" id="bookSlotBtn">✚ ЗАПИСАТЬ</button>
             <div id="liveStatus" style="background:#dcf5e3; border-radius:40px; padding:10px; margin-top:12px; display:none;"></div>
         </div>
