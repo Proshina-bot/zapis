@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Шиномонтаж PRO-шина · Запись в филиалы</title>
+    <title>Шиномонтаж PRO-шина · Онлайн запись</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz@14..32&display=swap" rel="stylesheet">
     <style>
-        /* ВСЕ СТИЛИ ИЗ ВАШЕЙ ТЕКУЩЕЙ ВЕРСИИ (БЕЗ ИЗМЕНЕНИЙ) */
+        /* --- СТИЛИ --- */
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: 'Inter', sans-serif; background: #dbe7ec; padding: 15px; display: flex; justify-content: center; }
         .container { max-width: 1800px; width: 100%; background: white; border-radius: 40px; box-shadow: 0 20px 40px -10px #1a414f; padding: 20px 25px; }
@@ -63,33 +63,6 @@
         .size-selector { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 5px; }
         .size-btn { background: white; border: 2px solid #bed3e0; padding: 6px 12px; border-radius: 40px; font-weight: 600; font-size: 0.9rem; cursor: pointer; min-width: 55px; text-align: center; }
         .size-btn.selected { background: #ffcf9c; border-color: #ed8026; font-weight: 800; }
-        
-        /* ========== НОВЫЙ СТИЛЬ ДЛЯ ВЫБОРА УВЕДОМЛЕНИЯ ========== */
-        .notification-btns {
-            display: flex;
-            gap: 10px;
-            margin-top: 5px;
-        }
-        .notification-btn {
-            flex: 1;
-            background: white;
-            border: 2px solid #bed3e0;
-            padding: 10px;
-            border-radius: 40px;
-            font-weight: 600;
-            font-size: 0.9rem;
-            cursor: pointer;
-            transition: all 0.1s;
-            text-align: center;
-        }
-        .notification-btn.selected {
-            background: #ffcf9c;
-            border-color: #ed8026;
-            font-weight: 800;
-            box-shadow: 0 0 0 2px #f57c2e;
-        }
-        /* ======================================================= */
-        
         .primary-btn { background: #f6842a; border: none; color: white; font-weight: 800; font-size: 1.2rem; padding: 14px; width: 100%; border-radius: 60px; cursor: pointer; border-bottom: 4px solid #bd520f; margin-top: 15px; }
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,30,40,0.7); backdrop-filter: blur(5px); align-items: center; justify-content: center; z-index: 2000; }
         .modal.show { display: flex; }
@@ -115,7 +88,12 @@
         .move-mode .car-slot.free::after { content: "🔁 Перенести сюда"; position: absolute; top: -25px; background: #2e7d32; color: white; font-size: 0.8rem; padding: 2px 8px; border-radius: 20px; white-space: nowrap; }
         .date-picker-modal { display: flex; gap: 10px; margin: 20px 0; align-items: center; }
         .date-picker-modal input { flex: 1; padding: 12px; border: 2px solid #bed3e0; border-radius: 40px; font-size: 1rem; }
-        .car-slot.selected-slot { background: #ffe2be !important; border: 3px solid #f47b20 !important; box-shadow: 0 0 0 2px #f6842a; }
+        
+        .car-slot.selected-slot {
+            background: #ffe2be !important;
+            border: 3px solid #f47b20 !important;
+            box-shadow: 0 0 0 2px #f6842a;
+        }
     </style>
 </head>
 <body>
@@ -206,19 +184,22 @@
                 <input type="tel" id="phoneNumber" class="form-control" placeholder="+7 (___) ___-__-__">
             </div>
 
-            <!-- ========== НОВЫЙ БЛОК: ВЫБОР УВЕДОМЛЕНИЯ ========== -->
-            <div class="form-group">
-                <label>📢 Способ уведомления:</label>
-                <div class="notification-btns" id="notificationSelector">
-                    <button class="notification-btn selected" data-method="whatsapp">💬 WhatsApp</button>
-                    <button class="notification-btn" data-method="sms">📱 SMS</button>
-                </div>
-            </div>
-            <!-- ================================================= -->
-
             <div class="form-group">
                 <label>💬 Комментарий</label>
                 <textarea id="comment" class="form-control" placeholder="..."></textarea>
+            </div>
+
+            <!-- СПОСОБ УВЕДОМЛЕНИЯ -->
+            <div class="form-group">
+                <label>📢 Способ уведомления:</label>
+                <div style="display: flex; gap: 20px; margin-top: 8px;">
+                    <label style="display: flex; align-items: center; gap: 6px;">
+                        <input type="radio" name="notificationMethod" value="whatsapp" checked> WhatsApp
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 6px;">
+                        <input type="radio" name="notificationMethod" value="sms"> SMS
+                    </label>
+                </div>
             </div>
 
             <button class="primary-btn" id="bookSlotBtn">✚ ЗАПИСАТЬ</button>
@@ -284,7 +265,7 @@
         const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby8c3q7iu0FPf2R0u4OFETkLgvgUJMPMhNk08lBPlpQd-_-2VwBEbWYk5LgtVUNKR6l/exec';
         // =============================
 
-        // --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (ВАШИ, БЕЗ ИЗМЕНЕНИЙ) ---
+        // --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
         function formatPhone(value) {
             const digits = value.replace(/\D/g, '');
             let result = '+7';
@@ -320,40 +301,26 @@
         });
 
         // --- ГЕНЕРАЦИЯ ВРЕМЕННЫХ СЛОТОВ ---
-function getTimeSlotsForDate(date) {
-    if (!date) return [];
-    
-    // Парсим дату в формате YYYY-MM-DD
-    let year, month, day;
-    if (typeof date === 'string' && date.includes('-')) {
-        const parts = date.split('-');
-        year = parseInt(parts[0]);
-        month = parseInt(parts[1]) - 1;
-        day = parseInt(parts[2]);
-    } else {
-        const d = new Date(date);
-        year = d.getFullYear();
-        month = d.getMonth();
-        day = d.getDate();
-    }
-    
-    const d = new Date(year, month, day);
-    const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-    
-    let startHour = isWeekend ? 10 : 9;
-    let endHour = isWeekend ? 20 : 21;
-    
-    const slots = [];
-    for (let hour = startHour; hour < endHour; hour++) {
-        if (hour === 14) {
-            slots.push(`${hour.toString().padStart(2,'0')}:30`);
-        } else {
-            slots.push(`${hour.toString().padStart(2,'0')}:00`);
-            slots.push(`${hour.toString().padStart(2,'0')}:30`);
+        function getTimeSlotsForDate(date) {
+            if (!date) return [];
+            const d = new Date(date);
+            const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+            
+            let startHour = isWeekend ? 10 : 9;
+            let endHour = isWeekend ? 20 : 21;
+            
+            const slots = [];
+            for (let hour = startHour; hour < endHour; hour++) {
+                if (hour === 14) {
+                    slots.push(`${hour.toString().padStart(2,'0')}:30`);
+                } else {
+                    slots.push(`${hour.toString().padStart(2,'0')}:00`);
+                    slots.push(`${hour.toString().padStart(2,'0')}:30`);
+                }
+            }
+            return slots;
         }
-    }
-    return slots;
-}
+
         // --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ---
         const CARS = ['1', '2', '3'];
         let occupiedSlots = {};
@@ -363,8 +330,6 @@ function getTimeSlotsForDate(date) {
         let currentBranch = 'ryabinina';
         let moveSourceKey = null;
         let currentDetailSlotKey = null;
-        // ========== НОВАЯ ПЕРЕМЕННАЯ ==========
-        let selectedNotificationMethod = 'whatsapp';
 
         let isUpdating = false;
 
@@ -383,11 +348,7 @@ function getTimeSlotsForDate(date) {
         const selectedServicesDisplay = document.getElementById('selectedServicesDisplay');
         const sizeBtns = document.querySelectorAll('.size-btn');
         const branchBtns = document.querySelectorAll('.branch-btn');
-        
-        // ========== НОВЫЕ КНОПКИ УВЕДОМЛЕНИЯ ==========
-        const notificationBtns = document.querySelectorAll('.notification-btn');
 
-        // --- МОДАЛЬНЫЕ ОКНА ---
         const journalModal = document.getElementById('journalModal');
         const openJournalBtn = document.getElementById('openJournalBtn');
         const closeJournalBtn = document.getElementById('closeJournalBtn');
@@ -407,7 +368,7 @@ function getTimeSlotsForDate(date) {
         const extraCommentField = document.getElementById('extraCommentField');
         const saveExtraCommentBtn = document.getElementById('saveExtraCommentBtn');
 
-        // --- ФУНКЦИИ UI (ВАШИ, БЕЗ ИЗМЕНЕНИЙ) ---
+        // --- ФУНКЦИИ UI ---
         function updateServicesDisplay() {
             selectedServicesDisplay.textContent = selectedServices.length ? 
                 '✓ Выбрано: ' + selectedServices.join(', ') : '✓ Выбрано: —';
@@ -432,18 +393,7 @@ function getTimeSlotsForDate(date) {
             setTimeout(() => statusDiv.style.display = 'none', 3000);
         }
 
-        // ========== НОВАЯ ФУНКЦИЯ ДЛЯ ВЫБОРА УВЕДОМЛЕНИЯ ==========
-        function initNotificationSelector() {
-            notificationBtns.forEach(btn => {
-                btn.addEventListener('click', function() {
-                    notificationBtns.forEach(b => b.classList.remove('selected'));
-                    this.classList.add('selected');
-                    selectedNotificationMethod = this.dataset.method;
-                });
-            });
-        }
-
-        // --- ОБРАБОТЧИКИ (ВАШИ) ---
+        // --- ОБРАБОТЧИКИ ---
         serviceBtns.forEach(btn => {
             btn.addEventListener('click', function() {
                 const service = this.dataset.service;
@@ -468,6 +418,7 @@ function getTimeSlotsForDate(date) {
             });
         });
 
+        // --- ПЕРЕКЛЮЧЕНИЕ ФИЛИАЛОВ ---
         branchBtns.forEach(btn => {
             btn.addEventListener('click', function() {
                 branchBtns.forEach(b => b.classList.remove('active'));
@@ -496,17 +447,16 @@ function getTimeSlotsForDate(date) {
             if (btn.dataset.special === 'true') btn.style.display = 'none';
         });
 
-        // --- КАЛЕНДАРИ (ВАШИ) ---
-flatpickr(datePicker, {
-    dateFormat: "Y-m-d",
-    defaultDate: new Date(),
-    locale: 'ru',
-    onChange: function(selectedDates, dateStr) { 
-        console.log('Дата выбрана:', dateStr);
-        loadOccupiedFromServer(); 
-        clearSelection(); 
-    }
-});
+        // --- КАЛЕНДАРИ ---
+        flatpickr(datePicker, {
+            dateFormat: "Y-m-d",
+            defaultDate: new Date(),
+            locale: 'ru',
+            onChange: function(_, dateStr) { 
+                loadOccupiedFromServer(); 
+                clearSelection(); 
+            }
+        });
 
         flatpickr(moveDatePicker, {
             dateFormat: "Y-m-d",
@@ -523,7 +473,7 @@ flatpickr(datePicker, {
             }
         });
 
-        // --- ЗАГРУЗКА ДАННЫХ (ВАША) ---
+        // --- ЗАГРУЗКА ДАННЫХ ---
         async function loadOccupiedFromServer() {
             if (isUpdating) return;
             try {
@@ -544,7 +494,7 @@ flatpickr(datePicker, {
             }
         }
 
-        // --- ОТПРАВКА ДАННЫХ (ВАША, С ДОБАВЛЕНИЕМ notificationMethod) ---
+        // --- ОТПРАВКА ДАННЫХ ---
         async function sendToServer(action, data) {
             try {
                 isUpdating = true;
@@ -580,86 +530,83 @@ flatpickr(datePicker, {
             }
         }
 
-        // --- ОТРИСОВКА СЛОТОВ (ВАША, БЕЗ ИЗМЕНЕНИЙ) ---
-function renderSlotsForDate(dateStr) {
-    if (!dateStr) return;
-    
-    slotsContainer.innerHTML = '';
-    const timeSlots = getTimeSlotsForDate(dateStr);
-    let freeCount = 0;
+        // --- ОТРИСОВКА СЛОТОВ (С НОРМАЛИЗАЦИЕЙ ВРЕМЕНИ) ---
+        function renderSlotsForDate(dateStr) {
+            if (!dateStr) return;
+            
+            const currentSlotKey = currentSelection.slotKey;
+            slotsContainer.innerHTML = '';
+            const timeSlots = getTimeSlotsForDate(dateStr);
+            let freeCount = 0;
 
-    timeSlots.forEach(time => {
-        const isLunch = time === '14:00';
-        const row = document.createElement('div');
-        row.className = 'time-slot-row';
-        
-        const timeLabel = document.createElement('div');
-        timeLabel.className = `time-label ${isLunch ? 'lunch' : ''}`;
-        timeLabel.innerHTML = isLunch ? `${time}<br><small>Обед</small>` : time;
-        row.appendChild(timeLabel);
+            timeSlots.forEach(time => {
+                const isLunch = time === '14:00';
+                const row = document.createElement('div');
+                row.className = 'time-slot-row';
+                
+                const timeLabel = document.createElement('div');
+                timeLabel.className = `time-label ${isLunch ? 'lunch' : ''}`;
+                timeLabel.innerHTML = isLunch ? `${time}<br><small>Обед</small>` : time;
+                row.appendChild(timeLabel);
 
-        const carsDiv = document.createElement('div');
-        carsDiv.className = 'cars-row';
+                const carsDiv = document.createElement('div');
+                carsDiv.className = 'cars-row';
 
-        if (isLunch) {
-            for (let i = 0; i < CARS.length; i++) {
-                const emptySlot = document.createElement('div');
-                emptySlot.className = 'car-slot occupied';
-                emptySlot.style.background = '#ffcf9c';
-                emptySlot.style.opacity = '0.7';
-                emptySlot.style.cursor = 'not-allowed';
-                emptySlot.innerHTML = `<span style="font-size:0.9rem;">🚫 Обед</span>`;
-                carsDiv.appendChild(emptySlot);
-            }
-        } else {
-            CARS.forEach((car, idx) => {
-                // НОРМАЛИЗУЕМ КЛЮЧ: ищем и с ведущим нулём, и без него
-                let slotKey = `${currentBranch}_${dateStr}_${time}_${car}`;
-                let occ = occupiedSlots[slotKey];
-                
-                // Если не нашли, пробуем без ведущего нуля
-                if (!occ && time.startsWith('0')) {
-                    const timeNoZero = time.substring(1);
-                    const altKey = `${currentBranch}_${dateStr}_${timeNoZero}_${car}`;
-                    occ = occupiedSlots[altKey];
-                    if (occ) slotKey = altKey;
-                }
-                
-                const slotDiv = document.createElement('div');
-                let baseClass = 'car-slot';
-                
-                if (occ) {
-                    baseClass += ' occupied';
-                    baseClass += occ.branch === 'ryabinina' ? ' ryabinina' : ' amundsena';
-                    if (occ.services && occ.branch === 'amundsena') {
-                        const hasSpecial = occ.services.some(s => s === 'Слесарка' || s === 'Кондиционер');
-                        if (hasSpecial) baseClass += ' special-service';
+                if (isLunch) {
+                    for (let i = 0; i < CARS.length; i++) {
+                        const emptySlot = document.createElement('div');
+                        emptySlot.className = 'car-slot occupied';
+                        emptySlot.style.background = '#ffcf9c';
+                        emptySlot.style.opacity = '0.7';
+                        emptySlot.style.cursor = 'not-allowed';
+                        emptySlot.innerHTML = `<span style="font-size:0.9rem;">🚫 Обед</span>`;
+                        carsDiv.appendChild(emptySlot);
                     }
-                    slotDiv.innerHTML = `
-                        <span class="slot-brand">${occ.carBrand || '???'}</span>
-                        <span class="slot-services">${occ.services ? occ.services.join(', ') : ''}</span>
-                    `;
                 } else {
-                    baseClass += ' free';
-                    freeCount++;
-                    slotDiv.innerHTML = `<span class="slot-empty">ПУСТО</span>`;
-                }
-                
-                slotDiv.className = baseClass;
-                slotDiv.dataset.time = time;
-                slotDiv.dataset.car = car;
-                slotDiv.dataset.carIndex = idx;
-                slotDiv.dataset.slotKey = slotKey;
+                    CARS.forEach((car, idx) => {
+                        // Нормализация ключа: ищем с ведущим нулём и без него
+                        let slotKey = `${currentBranch}_${dateStr}_${time}_${car}`;
+                        let occ = occupiedSlots[slotKey];
+                        
+                        if (!occ && time.startsWith('0')) {
+                            const timeNoZero = time.substring(1);
+                            const altKey = `${currentBranch}_${dateStr}_${timeNoZero}_${car}`;
+                            occ = occupiedSlots[altKey];
+                            if (occ) slotKey = altKey;
+                        }
+                        
+                        const slotDiv = document.createElement('div');
+                        let baseClass = 'car-slot';
+                        
+                        if (occ) {
+                            baseClass += ' occupied';
+                            baseClass += occ.branch === 'ryabinina' ? ' ryabinina' : ' amundsena';
+                            if (occ.services && occ.branch === 'amundsena') {
+                                const hasSpecial = occ.services.some(s => s === 'Слесарка' || s === 'Кондиционер');
+                                if (hasSpecial) baseClass += ' special-service';
+                            }
+                            slotDiv.innerHTML = `
+                                <span class="slot-brand">${occ.carBrand || '???'}</span>
+                                <span class="slot-services">${occ.services ? occ.services.join(', ') : ''}</span>
+                            `;
+                        } else {
+                            baseClass += ' free';
+                            freeCount++;
+                            slotDiv.innerHTML = `<span class="slot-empty">ПУСТО</span>`;
+                        }
+                        
+                        slotDiv.className = baseClass;
+                        slotDiv.dataset.time = time;
+                        slotDiv.dataset.car = car;
+                        slotDiv.dataset.carIndex = idx;
+                        slotDiv.dataset.slotKey = slotKey;
 
-                // ... остальные обработчики
-                carsDiv.appendChild(slotDiv);
-            });
-        }
-        row.appendChild(carsDiv);
-        slotsContainer.appendChild(row);
-    });
-    freeSlotsSpan.textContent = `🟢 ${freeCount} свободно`;
-    
+                        if (occ) {
+                            slotDiv.addEventListener('click', () => {
+                                if (document.body.classList.contains('move-mode')) {
+                                    showStatus('❌ Нельзя выбрать занятый слот для переноса', 'error');
+                                    return;
+                                }
                                 currentDetailSlotKey = slotKey;
                                 const data = occupiedSlots[slotKey];
                                 detailInfoDiv.innerHTML = `
@@ -678,30 +625,29 @@ function renderSlotsForDate(dateStr) {
                         } else {
                             slotDiv.addEventListener('click', async (e) => {
                                 e.stopPropagation();
-                              if (document.body.classList.contains('move-mode') && moveSourceKey) {
-    if (occupiedSlots[moveSourceKey]) {
-        const sourceData = occupiedSlots[moveSourceKey];
-        
-        await sendToServer('move', {
-            oldSlotKey: moveSourceKey,
-            newSlotKey: slotKey,
-            newBranch: currentBranch,
-            newDate: dateStr,
-            newTime: time,
-            newCar: car,
-            services: sourceData.services.join(','),
-            size: sourceData.size,
-            carBrand: sourceData.carBrand,
-            clientName: sourceData.clientName,
-            phone: sourceData.phone,
-            comment: sourceData.comment,
-            extraComment: sourceData.extraComment || '',
-            notificationMethod: sourceData.notificationMethod || 'whatsapp'  // ← ЭТО ВАЖНО!
-        });
-        exitMoveMode();
-    }
-    return;
-}
+                                if (document.body.classList.contains('move-mode') && moveSourceKey) {
+                                    if (occupiedSlots[moveSourceKey]) {
+                                        const sourceData = occupiedSlots[moveSourceKey];
+                                        await sendToServer('move', {
+                                            oldSlotKey: moveSourceKey,
+                                            newSlotKey: slotKey,
+                                            newBranch: currentBranch,
+                                            newDate: dateStr,
+                                            newTime: time,
+                                            newCar: car,
+                                            services: sourceData.services.join(','),
+                                            size: sourceData.size,
+                                            carBrand: sourceData.carBrand,
+                                            clientName: sourceData.clientName,
+                                            phone: sourceData.phone,
+                                            comment: sourceData.comment,
+                                            extraComment: sourceData.extraComment || '',
+                                            notificationMethod: sourceData.notificationMethod || 'whatsapp'
+                                        });
+                                        exitMoveMode();
+                                    }
+                                    return;
+                                }
                                 
                                 document.querySelectorAll('.car-slot.free').forEach(s => s.classList.remove('selected-slot'));
                                 slotDiv.classList.add('selected-slot');
@@ -727,7 +673,7 @@ function renderSlotsForDate(dateStr) {
             }
         }
 
-        // --- ЖУРНАЛ (ВАШ, С ДОБАВЛЕНИЕМ ИНФОРМАЦИИ О СПОСОБЕ УВЕДОМЛЕНИЯ) ---
+        // --- ЖУРНАЛ ---
         function renderJournal() {
             try {
                 const search = journalSearch.value.toLowerCase() || '';
@@ -758,8 +704,6 @@ function renderSlotsForDate(dateStr) {
                 journalCardsDiv.innerHTML = entries.length ? '' : '<div style="padding:40px; text-align:center;">✖️ Нет записей</div>';
                 
                 entries.forEach(e => {
-                    const notificationIcon = e.notificationMethod === 'whatsapp' ? '💬' : '📱';
-                    const notificationText = e.notificationMethod === 'whatsapp' ? 'WhatsApp' : 'SMS';
                     const card = document.createElement('div');
                     card.className = 'record-card';
                     card.innerHTML = `
@@ -768,7 +712,7 @@ function renderSlotsForDate(dateStr) {
                         <div>👤 ${e.clientName || '—'}</div>
                         <div>🚗 ${e.carBrand || '—'}</div>
                         <div>📞 ${e.phone || '—'}</div>
-                        <div>${notificationIcon} Уведомление: ${notificationText}</div>
+                        <div>📢 ${e.notificationMethod === 'whatsapp' ? 'WhatsApp' : 'SMS'}</div>
                         <div class="card-actions">
                             <button class="goto-btn" data-slotkey="${e.key}">🔍 Перейти</button>
                             <button class="move-date-btn" data-slotkey="${e.key}">📅 Перенести</button>
@@ -820,13 +764,12 @@ function renderSlotsForDate(dateStr) {
                 });
                 
                 journalCount.textContent = `Всего: ${entries.length}`;
-                
             } catch (error) {
                 console.error('Ошибка в renderJournal:', error);
             }
         }
 
-        // --- ОБРАБОТЧИК ЗАПИСИ (С ДОБАВЛЕНИЕМ notificationMethod) ---
+        // --- ОБРАБОТЧИК ЗАПИСИ ---
         bookBtn.addEventListener('click', async () => {
             const date = datePicker.value;
             if (!date) return showStatus('❌ Выберите дату', 'error');
@@ -840,6 +783,7 @@ function renderSlotsForDate(dateStr) {
             if (occupiedSlots[slotKey]) return showStatus('❌ Слот только что заняли', 'error');
 
             const clientName = capitalizeName(clientNameInput.value.trim());
+            const notificationMethod = document.querySelector('input[name="notificationMethod"]:checked').value;
 
             await sendToServer('new', {
                 branch: currentBranch,
@@ -852,7 +796,7 @@ function renderSlotsForDate(dateStr) {
                 clientName: clientName,
                 phone: phoneInput.value.trim(),
                 comment: commentInput.value.trim(),
-                notificationMethod: selectedNotificationMethod  // ← НОВОЕ ПОЛЕ
+                notificationMethod: notificationMethod
             });
 
             clientNameInput.value = ''; 
@@ -867,7 +811,7 @@ function renderSlotsForDate(dateStr) {
             clearSelection();
         });
 
-        // --- СОХРАНЕНИЕ КОММЕНТАРИЯ (ВАШ) ---
+        // --- СОХРАНЕНИЕ КОММЕНТАРИЯ ---
         saveExtraCommentBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
             if (!currentDetailSlotKey) {
@@ -887,7 +831,7 @@ function renderSlotsForDate(dateStr) {
             showStatus('✅ Комментарий сохранён', 'success');
         });
 
-        // --- УДАЛЕНИЕ (ВАШ) ---
+        // --- УДАЛЕНИЕ ---
         deleteFromDetailBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
             if (currentDetailSlotKey && confirm('Удалить эту запись?')) {
@@ -897,7 +841,7 @@ function renderSlotsForDate(dateStr) {
             }
         });
 
-        // --- УПРАВЛЕНИЕ МОДАЛКАМИ (ВАШИ) ---
+        // --- УПРАВЛЕНИЕ МОДАЛКАМИ ---
         openJournalBtn.addEventListener('click', () => { 
             renderJournal(); 
             journalModal.classList.add('show'); 
@@ -941,7 +885,7 @@ function renderSlotsForDate(dateStr) {
         
         journalSearch.addEventListener('input', renderJournal);
 
-        // --- АВТООБНОВЛЕНИЕ (ВАШЕ) ---
+        // --- АВТООБНОВЛЕНИЕ КАЖДЫЕ 5 СЕКУНД ---
         setInterval(() => {
             if (!isUpdating && !document.body.classList.contains('move-mode') && 
                 !journalModal.classList.contains('show') && !moveDateModal.classList.contains('show')) {
@@ -952,7 +896,6 @@ function renderSlotsForDate(dateStr) {
         // --- ИНИЦИАЛИЗАЦИЯ ---
         loadOccupiedFromServer();
         selectedBranchSpan.textContent = 'Рябинина';
-        initNotificationSelector(); // ← НОВАЯ ИНИЦИАЛИЗАЦИЯ
 
     })();
 </script>
