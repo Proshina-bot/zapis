@@ -94,6 +94,27 @@
             border: 3px solid #f47b20 !important;
             box-shadow: 0 0 0 2px #f6842a;
         }
+.car-slot.has-comment {
+    border: 3px solid #4CAF50 !important;
+    box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.3);
+    position: relative;
+}
+.car-slot.has-comment::after {
+    content: "💬";
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    background: #4CAF50;
+    color: white;
+    font-size: 10px;
+    border-radius: 50%;
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+}
     </style>
 </head>
 <body>
@@ -589,6 +610,10 @@
                                 <span class="slot-brand">${occ.carBrand || '???'}</span>
                                 <span class="slot-services">${occ.services ? occ.services.join(', ') : ''}</span>
                             `;
+    // ✅ ДОБАВЬТЕ ЭТИ СТРОЧКИ
+    if (occ.comment || occ.extraComment) {
+        baseClass += ' has-comment';
+    }
                         } else {
                             baseClass += ' free';
                             freeCount++;
