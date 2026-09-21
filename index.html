@@ -1858,7 +1858,6 @@ mobileHtml += '<span>' + cat.title + '</span>';
 mobileHtml += '</div>';
 
 cat.services.forEach(function(srv) {
-    // Собираем валидные размеры с ценами
     const priceChips = [];
     sizesToShow.forEach(function(s) {
         const raw = srv.prices ? srv.prices[s] : undefined;
@@ -1873,7 +1872,6 @@ cat.services.forEach(function(srv) {
         );
     });
 
-    // Если вообще нет ни одной цены — не рендерим услугу
     if (priceChips.length === 0) return;
 
     mobileHtml += '<div class="price-mobile-item">';
@@ -1885,14 +1883,8 @@ cat.services.forEach(function(srv) {
 if (!Utils.isJunkExtraInfo(cat.extraInfo)) {
     mobileHtml += '<div class="cat-extra-info">' + cat.extraInfo + '</div>';
 }
- mobileHtml += '</div>';
-                });
-
-                if (!Utils.isJunkExtraInfo(cat.extraInfo)) {
-                    mobileHtml += '<div class="cat-extra-info">' + cat.extraInfo + '</div>';
-                }
-                mobileHtml += '</div>';
-            });
+mobileHtml += '</div>';
+});
 
             content.innerHTML = html + '<div class="price-mobile">' + mobileHtml + '</div>';
     };
