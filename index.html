@@ -1850,33 +1850,42 @@ textarea.form-control { resize: vertical; min-height: 70px; line-height: 1.5; }
                 }
                 html += '</div>';
 
-                // === Mobile карточки ===
-                mobileHtml += '<div class="price-mobile-cat">';
-                mobileHtml += '<div class="price-mobile-cat-title">';
-                mobileHtml += '<span class="category-icon">' + (cat.icon || '📋') + '</span>';
-                mobileHtml += '<span>' + cat.title + '</span>';
-                mobileHtml += '</div>';
+// === Mobile карточки ===
+mobileHtml += '<div class="price-mobile-cat">';
+mobileHtml += '<div class="price-mobile-cat-title">';
+mobileHtml += '<span class="category-icon">' + (cat.icon || '📋') + '</span>';
+mobileHtml += '<span>' + cat.title + '</span>';
+mobileHtml += '</div>';
 
-                cat.services.forEach(function(srv) {
-                    // Проверяем есть ли хоть одна цена
-                    const hasAnyPrice = sizesToShow.some(function(s) {
-                        return Utils.formatPrice(srv.prices[s]) !== null;
-                    });
-                    if (!hasAnyPrice) return;
+cat.services.forEach(function(srv) {
+    // Собираем валидные размеры с ценами
+    const priceChips = [];
+    sizesToShow.forEach(function(s) {
+        const raw = srv.prices ? srv.prices[s] : undefined;
+        const formatted = Utils.formatPrice(raw);
+        if (formatted === null) return;
+        const isMulti = String(raw).indexOf('/') !== -1;
+        priceChips.push(
+            '<div class="price-mobile-chip' + (isMulti ? ' multi' : '') + '">' +
+                '<span class="size">' + s + '</span>' +
+                '<span class="price">' + formatted + '</span>' +
+            '</div>'
+        );
+    });
 
-                    mobileHtml += '<div class="price-mobile-item">';
-                    mobileHtml += '<div class="name">' + srv.name + '</div>';
-                    mobileHtml += '<div class="price-mobile-prices">';
-                    sizesToShow.forEach(function(s) {
-                        const formatted = Utils.formatPrice(srv.prices[s]);
-                        if (formatted === null) return;
-                        const isMulti = String(srv.prices[s]).includes('/');
-                        mobileHtml += '<div class="price-mobile-chip' + (isMulti ? ' multi' : '') + '">' +
-                            '<span class="size">' + s + '</span>' +
-                            '<span class="price">' + formatted + '</span>' +
-                        '</div>';
-                    });
-                    mobileHtml += '</div></div>';
+    // Если вообще нет ни одной цены — не рендерим услугу
+    if (priceChips.length === 0) return;
+
+    mobileHtml += '<div class="price-mobile-item">';
+    mobileHtml += '<div class="name">' + srv.name + '</div>';
+    mobileHtml += '<div class="price-mobile-prices">' + priceChips.join('') + '</div>';
+    mobileHtml += '</div>';
+});
+
+if (!Utils.isJunkExtraInfo(cat.extraInfo)) {
+    mobileHtml += '<div class="cat-extra-info">' + cat.extraInfo + '</div>';
+}
+mobileHtml += '</div>';
                 });
 
                 if (!Utils.isJunkExtraInfo(cat.extraInfo)) {
