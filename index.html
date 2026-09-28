@@ -202,6 +202,7 @@
                         <div class="card-title-actions">
                             <span class="badge accent" id="recordsCount">0 из 0</span>
                             <button class="btn xs" id="toggleProcessedRecords" title="Скрыть обработанные">👁 Скрыть обработанные</button>
+                            <button class="btn xs" id="refreshRecordsBtn" title="Обновить записи">↻</button>
                         </div>
                     </div>
                     <div class="records-compact" id="recordsList"></div>
@@ -322,7 +323,7 @@
             <div class="card">
                 <div class="card-title"><span>📅 Сводка по дням месяца</span><span class="badge accent">слева — выручка, справа — зарплата мастеров</span></div>
                 <div class="tbl-wrap">
-                    <table class="tbl" id="daysTable">
+                    <table class="tbl tbl-days" id="daysTable">
                         <thead id="daysHead"></thead>
                         <tbody id="daysBody"></tbody>
                     </table>
