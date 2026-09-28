@@ -1,5 +1,5 @@
 /* ============================================================
- * PRO-шина · CRM — styles.css v2.7
+ * PRO-шина · CRM — styles.css v2.8
  * ============================================================ */
 
 :root {
@@ -385,6 +385,21 @@ body {
 }
 .tbl tr.row-total td:first-child { background: var(--bg-2); }
 
+/* 🔑 Сводка по дням месяца — узкая колонка «Дата» */
+.tbl-days { min-width: 0; }
+.tbl-days th:first-child,
+.tbl-days td:first-child {
+    width: 46px;
+    min-width: 46px;
+    max-width: 46px;
+    padding: 6px 2px;
+    text-align: center;
+    font-size: 11px;
+    letter-spacing: 0;
+}
+.tbl-days td:first-child { font-weight: 700; color: var(--text-1); }
+.tbl-days th { padding: 6px 4px; }
+
 .services-table-wrap { overflow-x: auto; }
 .services-table { width: 100%; border-collapse: separate; border-spacing: 0; min-width: 600px; }
 .services-table th, .services-table td { padding: 5px 4px; text-align: center; font-size: 12px; }
@@ -610,25 +625,42 @@ body {
 }
 .cash-add-btn:hover { background: var(--bg-3); color: var(--accent); border-color: var(--accent); }
 
-.marks-list { display: flex; flex-direction: column; gap: 6px; max-height: 400px; overflow-y: auto; }
+/* ============ ПОМЕТКИ ============ */
+.marks-list { display: flex; flex-direction: column; gap: 5px; max-height: 400px; overflow-y: auto; }
+
+/* 🔑 ПК: одна компактная строка, комментарий рядом с мастером */
 .mark-item {
     display: grid;
-    grid-template-columns: 60px 40px 1fr auto auto;
-    gap: 10px; align-items: center;
-    padding: 8px 12px;
+    grid-template-columns: 46px 32px minmax(0, 1fr) auto auto 28px;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 10px;
     background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px;
     font-size: 12px;
 }
-.mark-item .date { font-size: 10px; color: var(--text-3); font-weight: 600; }
+.mark-item .date { font-size: 10px; color: var(--text-3); font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; }
 .mark-item .branch-ico {
-    font-size: 14px; text-align: center;
-    padding: 2px 6px; background: var(--bg-3);
+    font-size: 13px; text-align: center;
+    padding: 2px 5px; background: var(--bg-3);
     border-radius: 6px; border: 1px solid var(--border-2);
 }
-.mark-item .master { font-weight: 700; color: var(--text-0); }
-.mark-item .comment { color: var(--text-2); font-size: 11px; margin-left: 6px; }
-.mark-item .amount { font-weight: 800; font-variant-numeric: tabular-nums; }
-.mark-item .type { padding: 2px 8px; border-radius: 6px; font-size: 10px; font-weight: 700; }
+/* 🔑 Блок мастер + комментарий — в одну строку, комментарий серым */
+.mark-item .master-block {
+    display: flex; align-items: baseline; gap: 8px;
+    min-width: 0; overflow: hidden;
+}
+.mark-item .master {
+    font-weight: 700; color: var(--text-0);
+    white-space: nowrap; flex-shrink: 0;
+}
+.mark-item .comment {
+    color: var(--text-2);
+    font-size: 11px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0; flex: 1;
+}
+.mark-item .amount { font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mark-item .type { padding: 2px 8px; border-radius: 6px; font-size: 10px; font-weight: 700; white-space: nowrap; }
 .mark-item.warn .type { background: var(--warning-bg); color: var(--warning); border: 1px solid var(--warning-border); }
 .mark-item.warn .amount { color: var(--warning); }
 .mark-item.bad .type { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger-border); }
@@ -643,6 +675,7 @@ body {
     width: 24px; height: 24px; border-radius: 6px;
     background: transparent; border: 1px solid var(--border); color: var(--text-3);
     cursor: pointer; font-size: 12px; font-family: inherit; padding: 0;
+    justify-self: end;
 }
 .mark-item .del:hover { background: var(--danger-bg); border-color: var(--danger-border); color: var(--danger); }
 .mark-item .del.disabled { opacity: 0.3; cursor: not-allowed; }
@@ -1248,7 +1281,6 @@ body {
 
     .stats-panel { grid-template-columns: 1fr 1fr; gap: 8px; }
 
-    /* 🔑 Записи на сегодня — компактнее + телефон возвращён + крупнее шрифт */
     .records-compact { max-height: none; gap: 4px; }
     .rec-compact {
         grid-template-columns: 50px 1fr auto;
@@ -1260,7 +1292,7 @@ body {
     .rec-compact .info { gap: 1px; }
     .rec-compact .info .car { font-size: 12.5px; }
     .rec-compact .info .client { font-size: 11px; }
-    .rec-compact .info .phone { font-size: 11px; } /* 🔑 телефон виден */
+    .rec-compact .info .phone { font-size: 11px; }
     .rec-compact .client-line .rec-rating { font-size: 10px; padding: 1px 5px; }
     .rec-compact .actions .btn { padding: 4px 8px; font-size: 11px; }
     .rec-compact .status { padding: 3px 7px; font-size: 11px; }
@@ -1316,6 +1348,10 @@ body {
     .tbl { min-width: 780px; }
     .services-table { min-width: 520px; }
 
+    /* Сводка по дням на мобильном — тоже узкая дата */
+    .tbl-days th:first-child,
+    .tbl-days td:first-child { width: 40px; min-width: 40px; max-width: 40px; font-size: 10px; }
+
     .salary-wrap { margin: 0; padding: 0; overflow: visible; }
     .salary-wrap .tbl { display: none; }
     .salary-cards-mobile { display: flex; }
@@ -1331,31 +1367,19 @@ body {
 
     .summary-grid { grid-template-columns: 1fr 1fr; }
 
-    /* 🔑 Пометки за месяц — в одну строку + место под комментарий + тип справа */
+    /* 🔑 Пометки на мобильном — компактнее, комментарий рядом с мастером */
     .mark-item {
-        display: grid;
-        grid-template-columns: 44px 30px minmax(90px, auto) minmax(0, 1fr) auto auto;
-        gap: 6px;
-        align-items: center;
-        padding: 6px 10px;
+        grid-template-columns: 40px 26px minmax(0, 1fr) auto auto 26px;
+        gap: 5px;
+        padding: 5px 8px;
         font-size: 11px;
     }
     .mark-item .date { font-size: 10px; }
-    .mark-item .branch-ico { font-size: 12px; padding: 1px 5px; }
-    .mark-item .master { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    /* 🔑 Место под комментарий между суммой и типом */
-    .mark-item .comment {
-        display: block;
-        margin-left: 0;
-        font-size: 10px;
-        color: var(--text-3);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        min-width: 0;
-    }
-    .mark-item .amount { font-size: 11px; white-space: nowrap; }
-    .mark-item .type { font-size: 9px; padding: 2px 6px; white-space: nowrap; }
+    .mark-item .branch-ico { font-size: 12px; padding: 1px 4px; }
+    .mark-item .master { font-size: 11px; }
+    .mark-item .comment { font-size: 10px; }
+    .mark-item .amount { font-size: 11px; }
+    .mark-item .type { font-size: 9px; padding: 2px 6px; }
     .mark-item .del { width: 22px; height: 22px; font-size: 11px; }
 
     .cars-hide-controls { flex-direction: column; align-items: stretch; gap: 6px; }
@@ -1402,13 +1426,14 @@ body {
     .summary-grid { grid-template-columns: 1fr; }
     .page-header-title h2 { font-size: 18px; }
 
-    /* 🔑 Пометки — компактнее, но всё ещё одна строка */
+    /* Пометки — ещё компактнее на узком */
     .mark-item {
-        grid-template-columns: 40px 26px minmax(80px, auto) minmax(0, 1fr) auto auto;
-        gap: 5px;
-        padding: 5px 8px;
+        grid-template-columns: 36px 24px minmax(0, 1fr) auto auto 24px;
+        gap: 4px;
+        padding: 5px 7px;
         font-size: 10px;
     }
     .mark-item .type { font-size: 9px; padding: 1px 5px; }
     .mark-item .del { width: 20px; height: 20px; font-size: 10px; }
+    .mark-item .comment { font-size: 9px; }
 }
