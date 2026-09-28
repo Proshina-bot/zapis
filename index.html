@@ -25,16 +25,11 @@
     <button class="refresh-btn" id="mobileRefreshBtn" aria-label="Обновить">↻</button>
 </header>
 
-<!-- ЗАТЕМНЕНИЕ -->
 <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
-
-<!-- ТОСТЫ -->
 <div class="toast-container" id="toastContainer"></div>
 
-<!-- ПРИЛОЖЕНИЕ -->
 <div class="app">
 
-    <!-- САЙДБАР -->
     <aside class="sidebar" id="sidebar">
         <div class="logo">
             <div class="logo-inner">
@@ -74,7 +69,6 @@
         </div>
     </aside>
 
-    <!-- ОСНОВНАЯ ОБЛАСТЬ -->
     <main class="main">
 
         <!-- ==================== НОВАЯ ЗАПИСЬ ==================== -->
@@ -146,7 +140,7 @@
 
                     <div class="form-group">
                         <label>Репутация клиента</label>
-                        <div class="rating-block">
+                        <div class="rating-block rating-block-compact">
                             <button class="rating-btn good" id="ratingGood" title="Хороший">👍</button>
                             <button class="rating-btn bad" id="ratingBad" title="Проблемный">👎</button>
                         </div>
@@ -228,7 +222,6 @@
                 </div>
             </div>
 
-            <!-- ВЕРХНИЙ БЛОК: ЗАПИСИ + ПОДКАЧКА -->
             <div class="top-split">
                 <div class="card">
                     <div class="card-title">
@@ -250,7 +243,6 @@
                 </div>
             </div>
 
-            <!-- МАСТЕРА НА СМЕНЕ -->
             <div class="card">
                 <div class="card-title">
                     <span>👥 Мастера на смене</span>
@@ -259,7 +251,6 @@
                 <div class="masters-row" id="mastersRow"></div>
             </div>
 
-            <!-- УСЛУГИ И % -->
             <div class="card">
                 <div class="card-title">
                     <span>📋 Услуги и проценты (% от суммы услуги)</span>
@@ -273,34 +264,39 @@
                 </div>
             </div>
 
-            <!-- МАШИНЫ ЗА ДЕНЬ -->
+            <!-- МАШИНЫ ЗА ДЕНЬ — с новым управлением скрытия -->
             <div class="card">
                 <div class="card-title">
                     <span>🚗 Машины за день</span>
                     <div class="card-title-actions">
                         <span class="badge" id="carsCount">0 машин</span>
-                        <button class="btn xs" id="toggleCarsLimit" style="display:none">Показать все</button>
                     </div>
                 </div>
+
+                <div class="cars-hide-controls">
+                    <div class="cars-hide-input-group">
+                        <label>Скрыть</label>
+                        <input type="number" id="carsHideInput" min="0" step="1" value="0">
+                        <label>машин</label>
+                    </div>
+                    <button class="btn xs primary" id="applyHideCarsBtn">Скрыть</button>
+                    <button class="btn xs" id="showAllCarsBtn">Показать все</button>
+                </div>
+
                 <div class="cars-list" id="carsList"></div>
                 <button class="add-car-btn" id="addCarBtn">
                     <span>+</span> Добавить машину
                 </button>
-                <button class="add-car-btn show-more-cars" id="showMoreCarsBtn" style="display:none">
-                    Показать ещё 10 машин
-                </button>
             </div>
 
-            <!-- ИТОГИ ПО ОПЛАТАМ -->
             <div class="card">
                 <div class="card-title"><span>💵 Итоги по способам оплаты</span></div>
                 <div class="totals-grid" id="paymentsTotals"></div>
             </div>
 
-            <!-- ЗАРПЛАТА МАСТЕРОВ -->
             <div class="card">
                 <div class="card-title"><span>💰 Зарплата мастеров</span></div>
-                <div class="tbl-wrap">
+                <div class="tbl-wrap salary-wrap">
                     <table class="tbl" id="salaryTable">
                         <thead id="salaryHead"></thead>
                         <tbody id="salaryBody"></tbody>
@@ -308,7 +304,6 @@
                 </div>
             </div>
 
-            <!-- КАССА -->
             <div class="card">
                 <div class="card-title"><span>🏦 Касса</span></div>
                 <div class="cash-block">
@@ -341,7 +336,6 @@
                         </div>
                     </div>
 
-                    <!-- АВАНСЫ -->
                     <div class="cash-subblock">
                         <div class="cash-subblock-head">
                             <div class="cash-subblock-title">💸 Авансы мастерам</div>
@@ -351,7 +345,6 @@
                         <button class="cash-add-btn" id="addAdvanceBtn">+ Добавить аванс</button>
                     </div>
 
-                    <!-- РАСХОДЫ -->
                     <div class="cash-subblock">
                         <div class="cash-subblock-head">
                             <div class="cash-subblock-title">📝 Расходы</div>
@@ -438,6 +431,7 @@
             <div class="card">
                 <div class="card-title">
                     <span>📝 Пометки за месяц</span>
+                    <span class="badge accent">единые для двух филиалов</span>
                     <button class="btn xs primary" id="addMarkBtn">+ Добавить пометку</button>
                 </div>
                 <div class="marks-list" id="marksList"></div>
