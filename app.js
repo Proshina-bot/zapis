@@ -1,10 +1,9 @@
 /* ============================================================
- * PRO-шина · CRM — app.js v2.7
+ * PRO-шина · CRM — app.js v2.8
  * Правки:
- *  - Баг с оплатой: фикс на сервере (saveExtraComment возвращает _payment)
- *  - Зарплаты: sessionStorage-кэш для мгновенной загрузки
- *  - Пометки: с иконкой филиала, единые для двух филиалов
- *  - Оптимизация запросов
+ *  - Кнопка «↻» обновления записей в Тетрадке
+ *  - Пометки за месяц — компактные, комментарий рядом с мастером
+ *  - Сводка по дням — узкая колонка «Дата»
  * ============================================================ */
 
 (function() {
@@ -57,7 +56,6 @@
         }
     };
 
-    // 🔑 SessionStorage-кэш для зарплат (мгновенная загрузка при переключении вкладок)
     var SalaryCache = {
         save: function(key, data) {
             try {
@@ -180,7 +178,6 @@
         getMasters: function() { return Api._fetch({ action: 'getMasters' }); },
         getSalaryDay: function(date, branch) { return Api._fetch({ action: 'getSalaryDay', date: date, branch: branch }); },
         saveSalaryDay: function(data) { return Api._fetch(Object.assign({ action: 'saveSalaryDay' }, data), 1, 30000); },
-        // 🔑 Salary month: 1 retry, увеличенный timeout
         getSalaryMonth: function(year, month) {
             return Api._fetch({ action: 'getSalaryMonth', year: year, month: month }, Config.MAX_RETRIES_SALARY, Config.FETCH_TIMEOUT_SALARY);
         },
@@ -294,6 +291,16 @@
         fmtMoney: function(n) {
             n = Number(n) || 0;
             return n.toLocaleString('ru-RU') + ' ₽';
+        },
+        // Экранирование для вставки в HTML (комментарии могут содержать спецсимволы)
+        escapeHtml: function(str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
     };
 
@@ -539,8 +546,8 @@
                             slot.className = cls;
                             slot.dataset.slotKey = slotKey;
                             slot.innerHTML =
-                                '<span class="brand">' + (occ.carBrand || '???') + '</span>' +
-                                (servicesLine ? '<span class="services-line">' + servicesLine + '</span>' : '') +
+                                '<span class="brand">' + Utils.escapeHtml(occ.carBrand || '???') + '</span>' +
+                                (servicesLine ? '<span class="services-line">' + Utils.escapeHtml(servicesLine) + '</span>' : '') +
                                 '<span class="rating-line">' +
                                     (ratingNum ? '<span class="rating-num ' + ratingCls + '">' + ratingNum + '</span>' : '') +
                                     (visits > 1 ? '<span class="visits-badge">' + visits + '</span>' : '') +
@@ -710,7 +717,7 @@
                 var paymentRows = (payment.services || []).map(function(s) {
                     var amt = Number(s.amount) || 0;
                     if (!amt) return '';
-                    return '<div class="payment-service"><span>' + (s.name || '') + (s.payment ? ' · ' + Payments.label(s.payment) : '') + '</span><span class="price">' + Utils.fmtMoney(amt) + '</span></div>';
+                    return '<div class="payment-service"><span>' + Utils.escapeHtml(s.name || '') + (s.payment ? ' · ' + Payments.label(s.payment) : '') + '</span><span class="price">' + Utils.fmtMoney(amt) + '</span></div>';
                 }).join('');
                 paymentHtml =
                     '<div class="record-payment-block">' +
@@ -723,10 +730,10 @@
             content.innerHTML =
                 '<div class="modal-header">' +
                     '<div class="modal-client-header">' +
-                        '<div class="modal-avatar">' + (data.carBrand || '?').charAt(0).toUpperCase() + '</div>' +
+                        '<div class="modal-avatar">' + Utils.escapeHtml((data.carBrand || '?').charAt(0).toUpperCase()) + '</div>' +
                         '<div class="modal-client-info">' +
-                            '<h2>' + (data.carBrand || 'Без названия') + '</h2>' +
-                            '<div class="phone">' + (data.clientName || 'Без имени') + ' · ' + (data.phone || '—') + '</div>' +
+                            '<h2>' + Utils.escapeHtml(data.carBrand || 'Без названия') + '</h2>' +
+                            '<div class="phone">' + Utils.escapeHtml(data.clientName || 'Без имени') + ' · ' + Utils.escapeHtml(data.phone || '—') + '</div>' +
                         '</div>' +
                     '</div>' +
                     '<button class="close-modal-btn" onclick="Records.closeModal()">×</button>' +
@@ -734,14 +741,14 @@
                 '<div class="record-detail-grid">' +
                     '<div class="record-detail-item"><div class="label">Филиал</div><div class="value small">' + branchName + '</div></div>' +
                     '<div class="record-detail-item"><div class="label">Дата · Время</div><div class="value">' + Utils.formatDate(date) + ' · ' + time + '</div></div>' +
-                    '<div class="record-detail-item"><div class="label">Размер</div><div class="value">' + (data.size || '—') + '</div></div>' +
+                    '<div class="record-detail-item"><div class="label">Размер</div><div class="value">' + Utils.escapeHtml(data.size || '—') + '</div></div>' +
                     '<div class="record-detail-item"><div class="label">Уведомление</div><div class="value small">' +
                         (data.notificationMethod === 'whatsapp' ? '💬 WhatsApp' : data.notificationMethod === 'sms' ? '📱 SMS' : '—') +
                     '</div></div>' +
                     '<div class="record-detail-item" style="grid-column:1/-1"><div class="label">Услуги</div><div class="value small">' +
-                        (services.length ? services.join(', ') : '—') +
+                        (services.length ? Utils.escapeHtml(services.join(', ')) : '—') +
                     '</div></div>' +
-                    (data.comment ? '<div class="record-detail-item" style="grid-column:1/-1"><div class="label">Комментарий</div><div class="value small">' + data.comment + '</div></div>' : '') +
+                    (data.comment ? '<div class="record-detail-item" style="grid-column:1/-1"><div class="label">Комментарий</div><div class="value small">' + Utils.escapeHtml(data.comment) + '</div></div>' : '') +
                 '</div>' +
                 paymentHtml +
                 '<div class="modal-section-title">Репутация клиента</div>' +
@@ -750,7 +757,7 @@
                     '<button class="record-rating-btn bad ' + (rating === 'bad' ? 'active' : '') + '" id="recRatingBad">👎 Проблемный</button>' +
                 '</div>' +
                 '<div class="modal-section-title">Дополнительный комментарий</div>' +
-                '<textarea id="recExtraComment" class="form-control" placeholder="Заметка мастера...">' + (data.extraComment || '') + '</textarea>' +
+                '<textarea id="recExtraComment" class="form-control" placeholder="Заметка мастера...">' + Utils.escapeHtml(data.extraComment || '') + '</textarea>' +
                 '<div class="record-actions">' +
                     '<button class="btn danger delete-btn" id="deleteRecordBtn">🗑 Удалить</button>' +
                     '<button class="btn move-btn" id="openMoveBtn">⇄ Перенести</button>' +
@@ -772,7 +779,6 @@
                 var extra = UI.$('recExtraComment').value.trim();
                 var newRatingVal = newRating || 'neutral';
 
-                // 🔑 Сервер теперь возвращает записи с _payment — mergePayment не нужен
                 Api.saveExtra(slotKey, extra, newRatingVal, data.phone || '').then(function(res) {
                     if (res && !res.error) {
                         State.occupiedSlots = Utils.normalizeAllKeys(res);
@@ -834,7 +840,7 @@
             content.innerHTML =
                 '<div class="modal-header">' +
                     '<div><h2 style="font-size:18px;font-weight:700">Перенос записи</h2>' +
-                    '<div style="font-size:13px;color:var(--text-2);margin-top:4px">' + (data.carBrand || '') + ' · ' + (data.clientName || '') + '</div></div>' +
+                    '<div style="font-size:13px;color:var(--text-2);margin-top:4px">' + Utils.escapeHtml(data.carBrand || '') + ' · ' + Utils.escapeHtml(data.clientName || '') + '</div></div>' +
                     '<button class="close-modal-btn" onclick="Move.close()">×</button>' +
                 '</div>' +
                 '<div class="form-group"><label>Новая дата</label><input type="text" id="moveDatePicker" class="form-control" readonly></div>' +
@@ -986,7 +992,7 @@
                         .map(function(s) { return s.name + ' ' + Utils.fmtMoney(s.amount); })
                         .join(' · ');
                     paymentHtml = '<div class="record-payment-inline">' +
-                        '<span class="services-list">💰 ' + (servicesList || 'оплата') + '</span>' +
+                        '<span class="services-list">💰 ' + Utils.escapeHtml(servicesList || 'оплата') + '</span>' +
                         '<span class="total">' + Utils.fmtMoney(e._payment.total) + '</span>' +
                     '</div>';
                 }
@@ -999,12 +1005,12 @@
                         '<span class="rating-num ' + rating + '">' + ratingScore + '</span>' +
                     '</div>' +
                     '<div class="record-body">' +
-                        '<div><span>Авто</span>' + (e.carBrand || '—') + '</div>' +
-                        '<div><span>Клиент</span>' + (e.clientName || '—') + '</div>' +
-                        '<div><span>Телефон</span>' + (e.phone || '—') + '</div>' +
-                        '<div><span>Услуги</span>' + svcs + ' ' + (e.size || '') + '</div>' +
-                        (e.comment ? '<div style="grid-column:1/-1"><span>Комментарий</span>' + e.comment + '</div>' : '') +
-                        (e.extraComment ? '<div style="grid-column:1/-1"><span style="color:var(--warning)">Доп. комментарий</span>' + e.extraComment + '</div>' : '') +
+                        '<div><span>Авто</span>' + Utils.escapeHtml(e.carBrand || '—') + '</div>' +
+                        '<div><span>Клиент</span>' + Utils.escapeHtml(e.clientName || '—') + '</div>' +
+                        '<div><span>Телефон</span>' + Utils.escapeHtml(e.phone || '—') + '</div>' +
+                        '<div><span>Услуги</span>' + Utils.escapeHtml(svcs) + ' ' + Utils.escapeHtml(e.size || '') + '</div>' +
+                        (e.comment ? '<div style="grid-column:1/-1"><span>Комментарий</span>' + Utils.escapeHtml(e.comment) + '</div>' : '') +
+                        (e.extraComment ? '<div style="grid-column:1/-1"><span style="color:var(--warning)">Доп. комментарий</span>' + Utils.escapeHtml(e.extraComment) + '</div>' : '') +
                         paymentHtml +
                     '</div>';
                 item.addEventListener('click', function() { Records.openModal(e.key); });
@@ -1050,7 +1056,7 @@
                 var initial = (c.name || '?').charAt(0).toUpperCase();
                 var cars = Object.keys(c.cars).map(function(b) {
                     var n = c.cars[b];
-                    return '<span class="client-car-tag">' + b + (n > 1 ? ' ×' + n : '') + '</span>';
+                    return '<span class="client-car-tag">' + Utils.escapeHtml(b) + (n > 1 ? ' ×' + n : '') + '</span>';
                 }).join('');
                 var phone = Utils.cleanPhone(c.phone);
                 var ratingScore = Utils.formatRating(c);
@@ -1058,10 +1064,10 @@
                 var card = document.createElement('div');
                 card.className = 'client-card ' + c.rating;
                 card.innerHTML =
-                    '<div class="client-avatar">' + initial + '</div>' +
+                    '<div class="client-avatar">' + Utils.escapeHtml(initial) + '</div>' +
                     '<div class="client-info">' +
-                        '<div class="name">' + (c.name || 'Без имени') + '</div>' +
-                        '<div class="phone">' + (c.phone || '—') + '</div>' +
+                        '<div class="name">' + Utils.escapeHtml(c.name || 'Без имени') + '</div>' +
+                        '<div class="phone">' + Utils.escapeHtml(c.phone || '—') + '</div>' +
                     '</div>' +
                     '<div class="client-cars-mini">' + cars + '</div>' +
                     '<div class="client-stats-mini"><div class="visits-count">' + c.visits + '<small>визитов</small></div></div>' +
@@ -1082,7 +1088,7 @@
             var stars = '★'.repeat(Math.round(ratio)) + '☆'.repeat(5 - Math.round(ratio));
 
             var cars = Object.entries(client.cars).map(function(entry) {
-                return '<div class="modal-car-item"><div class="brand">' + entry[0] + '</div>' +
+                return '<div class="modal-car-item"><div class="brand">' + Utils.escapeHtml(entry[0]) + '</div>' +
                     '<div class="count">' + entry[1] + ' ' + (entry[1] === 1 ? 'визит' : 'визитов') + '</div></div>';
             }).join('');
 
@@ -1091,7 +1097,7 @@
                 var safeKey = (h.key || '').replace(/"/g, '&quot;');
                 return '<div class="modal-history-item" data-record-key="' + safeKey + '">' +
                     '<div class="date">' + Utils.formatDate(h.date) + ' ' + h.time + '</div>' +
-                    '<div class="services">' + svcs + ' ' + (h.size || '') + '</div>' +
+                    '<div class="services">' + Utils.escapeHtml(svcs) + ' ' + Utils.escapeHtml(h.size || '') + '</div>' +
                     '<div class="branch-tag">' + (h.branch === 'ryabinina' ? 'Ряб.' : 'Амунд.') + '</div></div>';
             }).join('');
 
@@ -1100,8 +1106,8 @@
             content.innerHTML =
                 '<div class="modal-header">' +
                     '<div class="modal-client-header">' +
-                        '<div class="modal-avatar">' + initial + '</div>' +
-                        '<div class="modal-client-info"><h2>' + (client.name || 'Без имени') + '</h2><div class="phone">' + (client.phone || '—') + '</div></div>' +
+                        '<div class="modal-avatar">' + Utils.escapeHtml(initial) + '</div>' +
+                        '<div class="modal-client-info"><h2>' + Utils.escapeHtml(client.name || 'Без имени') + '</h2><div class="phone">' + Utils.escapeHtml(client.phone || '—') + '</div></div>' +
                     '</div>' +
                     '<button class="close-modal-btn" onclick="Clients.closeModal()">×</button>' +
                 '</div>' +
@@ -1158,7 +1164,6 @@
                 .filter(function(e) { return Utils.cleanPhone(e[1].phone) === phone; })
                 .map(function(e) { return e[0]; });
 
-            // 🔑 Сервер возвращает с _payment — просто берём последний успешный результат
             Promise.all(keys.map(function(k) {
                 return Api.saveExtra(k, State.occupiedSlots[k].extraComment || '', target, State.occupiedSlots[k].phone || '');
             })).then(function(results) {
@@ -1197,7 +1202,7 @@
                 if (data && !data.error) {
                     State.prices = {
                         ryabinina: data.ryabinina || null,
-                        amundsena: data.ammundsena ? data.ammundsena : (data.amundsena || null)
+                        amundsena: data.amundsena || null
                     };
                     State.pricesLoaded = true;
                     App.saveToCache();
@@ -1222,41 +1227,41 @@
 
             data.categories.forEach(function(cat) {
                 html += '<div class="price-category">';
-                html += '<div class="price-category-title"><span class="category-icon">' + (cat.icon || '📋') + '</span><span>' + cat.title + '</span></div>';
+                html += '<div class="price-category-title"><span class="category-icon">' + Utils.escapeHtml(cat.icon || '📋') + '</span><span>' + Utils.escapeHtml(cat.title) + '</span></div>';
                 html += '<div class="price-table-wrap"><div class="price-table">';
                 html += '<div class="price-row price-header"><div class="service-name">Услуга</div>';
                 sizesToShow.forEach(function(s) { html += '<div style="text-align:center">' + s + '</div>'; });
                 html += '</div>';
 
                 cat.services.forEach(function(srv) {
-                    html += '<div class="price-row"><div class="service-name">' + srv.name + '</div>';
+                    html += '<div class="price-row"><div class="service-name">' + Utils.escapeHtml(srv.name) + '</div>';
                     sizesToShow.forEach(function(s) {
                         var formatted = Utils.formatPrice(srv.prices[s]);
                         if (formatted === null) html += '<div class="price-cell empty">—</div>';
                         else {
                             var isMulti = String(srv.prices[s]).indexOf('/') !== -1;
-                            html += '<div class="price-cell' + (isMulti ? ' multi' : '') + '">' + formatted + '</div>';
+                            html += '<div class="price-cell' + (isMulti ? ' multi' : '') + '">' + Utils.escapeHtml(formatted) + '</div>';
                         }
                     });
                     html += '</div>';
                 });
                 html += '</div></div>';
-                if (!Utils.isJunkExtraInfo(cat.extraInfo)) html += '<div class="cat-extra-info">' + cat.extraInfo + '</div>';
+                if (!Utils.isJunkExtraInfo(cat.extraInfo)) html += '<div class="cat-extra-info">' + Utils.escapeHtml(cat.extraInfo) + '</div>';
                 html += '</div>';
 
-                mobileHtml += '<div class="price-mobile-cat"><div class="price-mobile-cat-title"><span class="category-icon">' + (cat.icon || '📋') + '</span><span>' + cat.title + '</span></div>';
+                mobileHtml += '<div class="price-mobile-cat"><div class="price-mobile-cat-title"><span class="category-icon">' + Utils.escapeHtml(cat.icon || '📋') + '</span><span>' + Utils.escapeHtml(cat.title) + '</span></div>';
                 cat.services.forEach(function(srv) {
                     var chips = [];
                     sizesToShow.forEach(function(s) {
                         var formatted = Utils.formatPrice(srv.prices[s]);
                         if (formatted === null) return;
                         var isMulti = String(srv.prices[s]).indexOf('/') !== -1;
-                        chips.push('<div class="price-mobile-chip' + (isMulti ? ' multi' : '') + '"><span class="size">' + s + '</span><span class="price">' + formatted + '</span></div>');
+                        chips.push('<div class="price-mobile-chip' + (isMulti ? ' multi' : '') + '"><span class="size">' + s + '</span><span class="price">' + Utils.escapeHtml(formatted) + '</span></div>');
                     });
                     if (chips.length === 0) return;
-                    mobileHtml += '<div class="price-mobile-item"><div class="name">' + srv.name + '</div><div class="price-mobile-prices">' + chips.join('') + '</div></div>';
+                    mobileHtml += '<div class="price-mobile-item"><div class="name">' + Utils.escapeHtml(srv.name) + '</div><div class="price-mobile-prices">' + chips.join('') + '</div></div>';
                 });
-                if (!Utils.isJunkExtraInfo(cat.extraInfo)) mobileHtml += '<div class="cat-extra-info">' + cat.extraInfo + '</div>';
+                if (!Utils.isJunkExtraInfo(cat.extraInfo)) mobileHtml += '<div class="cat-extra-info">' + Utils.escapeHtml(cat.extraInfo) + '</div>';
                 mobileHtml += '</div>';
             });
             content.innerHTML = html + '<div class="price-mobile">' + mobileHtml + '</div>';
@@ -1271,6 +1276,7 @@
         _hasChanges: false,
         _lastSavedAt: null,
         _isSaving: false,
+        _refreshingRecords: false,
 
         init: function() {
             flatpickr(UI.$('tetradkaDatePicker'), {
@@ -1314,6 +1320,63 @@
                 this.classList.toggle('primary', State.hideProcessedRecords);
                 var d = Tetradka.getCurrent();
                 if (d) Tetradka.renderRecords(d);
+            });
+
+            // 🔑 Кнопка «↻» — обновить записи на сегодня
+            UI.$('refreshRecordsBtn').addEventListener('click', function() {
+                if (Tetradka._refreshingRecords) return;
+                var d = Tetradka.getCurrent();
+                if (!d) return;
+                Tetradka._refreshingRecords = true;
+                var btn = this;
+                btn.classList.add('loading');
+                btn.textContent = '⏳';
+
+                Api.getSalaryDay(d.date, d.branch).then(function(res) {
+                    if (res && !res.error) {
+                        // Сохраняем локальные изменения
+                        var savedCars = d.cars;
+                        var savedAdvances = d.advances;
+                        var savedCash = d.cash;
+                        var savedMastersOnShift = d.mastersOnShift;
+                        var savedServices = d.services;
+
+                        // Применяем свежие данные
+                        Tetradka.applyServerData(d.branch, d.date, res);
+
+                        // Возвращаем локальные данные (не перезаписываем то, что юзер редактирует)
+                        var newD = State.tetradka[d.branch];
+                        if (newD) {
+                            newD.cars = savedCars;
+                            newD.advances = savedAdvances;
+                            newD.cash = savedCash;
+                            newD.mastersOnShift = savedMastersOnShift;
+                            newD.services = savedServices;
+                            // ВАЖНО: только records обновляем из свежих
+                            newD.records = Tetradka.getRecordsForDate(d.date, d.branch);
+                            // Связываем status со свежими
+                            var freshCars = (res.cars || []);
+                            newD.records.forEach(function(rec) {
+                                var linked = freshCars.find(function(c) { return c.recordKey === rec.key; });
+                                if (linked && linked.recordStatus) {
+                                    rec.status = linked.recordStatus;
+                                }
+                            });
+                        }
+                        Tetradka.renderAll();
+                        UI.toast('Записи обновлены', 'success', 1500);
+                    } else {
+                        UI.toast('Не удалось обновить', 'error');
+                    }
+                    Tetradka._refreshingRecords = false;
+                    btn.classList.remove('loading');
+                    btn.textContent = '↻';
+                }).catch(function() {
+                    Tetradka._refreshingRecords = false;
+                    btn.classList.remove('loading');
+                    btn.textContent = '↻';
+                    UI.toast('Ошибка обновления', 'error');
+                });
             });
 
             UI.$('applyHideCarsBtn').addEventListener('click', function() {
@@ -1767,14 +1830,14 @@
                 html += '<div class="rec-compact ' + cls + '">';
                 html += '<div class="time">' + r.time + '</div>';
                 html += '<div class="info" data-open-record="' + r.key + '">';
-                html += '<div class="car">' + r.car + '</div>';
+                html += '<div class="car">' + Utils.escapeHtml(r.car) + '</div>';
                 html += '<div class="client-line">';
-                html += '<span class="client">' + (r.client || '—') + '</span>';
+                html += '<span class="client">' + Utils.escapeHtml(r.client || '—') + '</span>';
                 if (ratingNum) {
                     html += '<span class="rec-rating ' + ratingCls + '">' + ratingNum + '</span>';
                 }
                 html += '</div>';
-                if (r.phone) html += '<div class="phone">' + r.phone + '</div>';
+                if (r.phone) html += '<div class="phone">' + Utils.escapeHtml(r.phone) + '</div>';
                 html += '</div>';
                 html += '<div class="actions">';
                 if (r.status === 'pending') {
@@ -1881,7 +1944,7 @@
             var html = '';
             d.masters.forEach(function(m) {
                 var on = d.mastersOnShift[m.name] ? 'on' : '';
-                html += '<div class="master-toggle ' + on + '" data-master="' + m.name + '"><span class="dot"></span><span>' + m.name + '</span></div>';
+                html += '<div class="master-toggle ' + on + '" data-master="' + Utils.escapeHtml(m.name) + '"><span class="dot"></span><span>' + Utils.escapeHtml(m.name) + '</span></div>';
             });
             UI.$('mastersRow').innerHTML = html;
             var count = Object.keys(d.mastersOnShift).filter(function(k) { return d.mastersOnShift[k]; }).length;
@@ -1905,7 +1968,7 @@
         renderServices: function(d) {
             var activeMasters = d.masters.filter(function(m) { return d.mastersOnShift[m.name]; });
             var headHtml = '<tr><th>Услуга</th>';
-            activeMasters.forEach(function(m) { headHtml += '<th>' + m.name + '</th>'; });
+            activeMasters.forEach(function(m) { headHtml += '<th>' + Utils.escapeHtml(m.name) + '</th>'; });
             headHtml += '<th></th></tr>';
             UI.$('servicesHead').innerHTML = headHtml;
 
@@ -1913,13 +1976,13 @@
             d.services.forEach(function(svc, idx) {
                 if (!svc || !svc.name) return;
                 bodyHtml += '<tr><td>';
-                if (svc.fixed) bodyHtml += '<span style="padding:5px 8px;display:inline-block;color:var(--text-0)">' + svc.name + ' 🔒</span>';
-                else bodyHtml += '<input type="text" value="' + svc.name + '" data-svc-name="' + idx + '">';
+                if (svc.fixed) bodyHtml += '<span style="padding:5px 8px;display:inline-block;color:var(--text-0)">' + Utils.escapeHtml(svc.name) + ' 🔒</span>';
+                else bodyHtml += '<input type="text" value="' + Utils.escapeHtml(svc.name) + '" data-svc-name="' + idx + '">';
                 bodyHtml += '</td>';
                 activeMasters.forEach(function(m) {
                     var val = svc.percents[m.name];
                     var cls = val !== undefined ? 'on' : '';
-                    bodyHtml += '<td class="pct-cell"><input type="number" step="0.1" min="0" max="100" value="' + (val !== undefined ? val : '') + '" class="' + cls + '" data-svc-pct="' + idx + '" data-master-name="' + m.name + '" placeholder="—"></td>';
+                    bodyHtml += '<td class="pct-cell"><input type="number" step="0.1" min="0" max="100" value="' + (val !== undefined ? val : '') + '" class="' + cls + '" data-svc-pct="' + idx + '" data-master-name="' + Utils.escapeHtml(m.name) + '" placeholder="—"></td>';
                 });
                 bodyHtml += '<td>';
                 if (!svc.fixed) bodyHtml += '<button class="del-svc" data-del-svc="' + idx + '">✕</button>';
@@ -1982,7 +2045,7 @@
                 html += '<div class="car-row ' + linked + '">';
                 html += '<div class="car-row-head">';
                 html += '<div class="num">#' + (originalIdx + 1) + (hasRecord ? ' 🔗' : '') + '</div>';
-                html += '<input class="car-name" type="text" value="' + c.car + '" data-car="' + c.id + '" placeholder="МАРКА">';
+                html += '<input class="car-name" type="text" value="' + Utils.escapeHtml(c.car) + '" data-car="' + c.id + '" placeholder="МАРКА">';
                 html += '<div class="total">' + Utils.fmtMoney(carTotal) + '</div>';
                 if (hasRecord) {
                     html += '<button class="open-record" data-open-car-record="' + c.recordKey + '" title="Открыть запись">👁</button>';
@@ -1999,7 +2062,7 @@
                     html += '<select class="car-service-name" data-car-svc-name="' + c.id + '" data-car-svc-idx="' + sidx + '">';
                     svcOptions.forEach(function(name) {
                         var sel = svc.name === name ? 'selected' : '';
-                        html += '<option value="' + name + '" ' + sel + '>' + name + '</option>';
+                        html += '<option value="' + Utils.escapeHtml(name) + '" ' + sel + '>' + Utils.escapeHtml(name) + '</option>';
                     });
                     html += '</select>';
                     html += '<input type="number" value="' + (svc.amount || 0) + '" min="0" step="10" data-car-svc-amount="' + c.id + '" data-car-svc-idx="' + sidx + '" placeholder="0">';
@@ -2139,7 +2202,7 @@
             }
 
             var headHtml = '<tr><th>Услуга</th>';
-            activeMasters.forEach(function(m) { headHtml += '<th>' + m.name + '</th>'; });
+            activeMasters.forEach(function(m) { headHtml += '<th>' + Utils.escapeHtml(m.name) + '</th>'; });
             headHtml += '</tr>';
             UI.$('salaryHead').innerHTML = headHtml;
 
@@ -2150,7 +2213,7 @@
             d.services.forEach(function(svc) {
                 if (!svc || !svc.name) return;
                 var sum = serviceSums[svc.name] || 0;
-                bodyHtml += '<tr><td>' + svc.name + ' <span style="color:var(--text-2);font-weight:500;font-size:11px">· ' + Utils.fmtMoney(sum) + '</span></td>';
+                bodyHtml += '<tr><td>' + Utils.escapeHtml(svc.name) + ' <span style="color:var(--text-2);font-weight:500;font-size:11px">· ' + Utils.fmtMoney(sum) + '</span></td>';
                 activeMasters.forEach(function(m) {
                     var pct = svc.percents[m.name];
                     if (pct === undefined) bodyHtml += '<td class="dim">—</td>';
@@ -2185,7 +2248,7 @@
                 activeMasters.forEach(function(m) {
                     var card = document.createElement('div');
                     card.className = 'salary-card-mobile';
-                    var rows = '<div class="name"><span>' + m.name + '</span><span class="total">' + Utils.fmtMoney(Math.round(masterTotals[m.name])) + '</span></div>';
+                    var rows = '<div class="name"><span>' + Utils.escapeHtml(m.name) + '</span><span class="total">' + Utils.fmtMoney(Math.round(masterTotals[m.name])) + '</span></div>';
                     d.services.forEach(function(svc) {
                         if (!svc || !svc.name) return;
                         var pct = svc.percents[m.name];
@@ -2193,7 +2256,7 @@
                         var sum = serviceSums[svc.name] || 0;
                         var salary = sum * (pct / 100);
                         rows += '<div class="row">' +
-                            '<span class="label">' + svc.name + ' · ' + pct + '%</span>' +
+                            '<span class="label">' + Utils.escapeHtml(svc.name) + ' · ' + pct + '%</span>' +
                             '<span class="value">' + Utils.fmtMoney(Math.round(salary)) + '</span>' +
                             '</div>';
                     });
@@ -2213,7 +2276,7 @@
                 html += '<select data-adv-master="' + a.id + '">';
                 d.masters.forEach(function(m) {
                     var sel = a.master === m.name ? 'selected' : '';
-                    html += '<option value="' + m.name + '" ' + sel + '>' + m.name + '</option>';
+                    html += '<option value="' + Utils.escapeHtml(m.name) + '" ' + sel + '>' + Utils.escapeHtml(m.name) + '</option>';
                 });
                 html += '</select>';
                 html += '<input type="number" class="amount" value="' + a.amount + '" min="0" step="100" data-adv-amount="' + a.id + '" placeholder="Сумма">';
@@ -2262,7 +2325,7 @@
             (d.cash.expenses || []).forEach(function(e) {
                 total += Number(e.amount) || 0;
                 html += '<div class="cash-list-item">';
-                html += '<input type="text" value="' + (e.description || '') + '" placeholder="на что" data-exp-desc="' + e.id + '">';
+                html += '<input type="text" value="' + Utils.escapeHtml(e.description || '') + '" placeholder="на что" data-exp-desc="' + e.id + '">';
                 html += '<input type="number" class="amount" value="' + (e.amount || 0) + '" min="0" step="100" data-exp-amount="' + e.id + '">';
                 html += '<button class="del" data-exp-del="' + e.id + '">✕</button>';
                 html += '</div>';
@@ -2357,7 +2420,6 @@
                 Api.closeMonth({ year: State.zarpYear, month: State.zarpMonth, branch: State.zarpBranch }).then(function(res) {
                     if (res && !res.error) {
                         UI.toast('Месяц закрыт', 'success');
-                        // 🔑 Чистим оба кэша
                         State.salaryMonthData = null;
                         State.salaryMonthLoadedKey = null;
                         SalaryCache.clearAll();
@@ -2374,26 +2436,22 @@
             UI.$('monthLabel').textContent = Zarp.monthLabel(State.zarpYear, State.zarpMonth);
             var currentKey = State.zarpYear + '_' + State.zarpMonth;
 
-            // 🔑 Если есть в памяти — рендерим сразу
             if (!force && State.salaryMonthData && State.salaryMonthLoadedKey === currentKey) {
                 Zarp.render();
                 return;
             }
 
-            // 🔑 Если есть в sessionStorage — рендерим сразу + фоновое обновление
             if (!force) {
                 var cached = SalaryCache.load(currentKey);
                 if (cached) {
                     State.salaryMonthData = cached;
                     State.salaryMonthLoadedKey = currentKey;
                     Zarp.render();
-                    // Фоновое обновление (не блокирует UI)
                     Zarp._backgroundRefresh(currentKey);
                     return;
                 }
             }
 
-            // 🔑 Первая загрузка — показываем скелетон
             UI.$('monthSummary').innerHTML = '<div class="skeleton" style="height:80px"></div>';
             UI.$('daysBody').innerHTML = '<tr><td colspan="10" style="text-align:center;padding:20px"><span class="spinner"></span></td></tr>';
             UI.$('combinedBody').innerHTML = '';
@@ -2407,11 +2465,9 @@
             });
         },
 
-        // 🔑 Фоновое обновление после показа кэша
         _backgroundRefresh: function(key) {
             Api.getSalaryMonth(State.zarpYear, State.zarpMonth).then(function(res) {
                 if (res && !res.error) {
-                    // Проверяем, что всё ещё тот же месяц
                     if (State.salaryMonthLoadedKey === key) {
                         State.salaryMonthData = res;
                         SalaryCache.save(key, res);
@@ -2472,10 +2528,11 @@
             days.forEach(function(d) { Object.keys(d.payroll || {}).forEach(function(m) { mastersOfBranch[m] = true; }); });
             var masterNames = Object.keys(mastersOfBranch);
 
-            var headHtml = '<tr><th>Дата</th><th>Касса</th><th>СПБ</th><th>Б/Н</th><th>Карта</th><th>Нал</th><th>Альмир</th><th>Счёт</th><th>Выручка</th>';
+            // 🔑 Узкая колонка «Дата»
+            var headHtml = '<tr><th style="width:46px;min-width:46px;max-width:46px;text-align:center">Дата</th><th>Касса</th><th>СПБ</th><th>Б/Н</th><th>Карта</th><th>Нал</th><th>Альмир</th><th>Счёт</th><th>Выручка</th>';
             headHtml += '<th style="text-align:center;background:rgba(77,158,255,0.1);color:var(--accent)" colspan="' + masterNames.length + '">Зарплаты мастеров</th></tr>';
-            var headHtml2 = '<tr><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th>';
-            masterNames.forEach(function(m) { headHtml2 += '<th>' + m + '</th>'; });
+            var headHtml2 = '<tr><th style="width:46px;min-width:46px;max-width:46px"></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th>';
+            masterNames.forEach(function(m) { headHtml2 += '<th>' + Utils.escapeHtml(m) + '</th>'; });
             headHtml2 += '</tr>';
             UI.$('daysHead').innerHTML = headHtml + headHtml2;
 
@@ -2570,7 +2627,7 @@
                 if (good > 0) { marksHtml += '<span class="tag good">🟢 +' + good.toLocaleString('ru-RU') + '</span>'; hasMarks = true; }
                 if (!hasMarks) marksHtml = '<span style="color:var(--text-3);font-size:11px">—</span>';
 
-                html += '<tr><td>' + master + '</td>';
+                html += '<tr><td>' + Utils.escapeHtml(master) + '</td>';
                 html += '<td class="success">' + Utils.fmtMoney(salary) + '</td>';
                 html += '<td class="warning">' + Utils.fmtMoney(advances) + '</td>';
                 html += '<td class="' + (balance >= 0 ? 'accent' : 'danger') + '">' + Utils.fmtMoney(balance) + '</td>';
@@ -2585,6 +2642,7 @@
             UI.$('combinedBody').innerHTML = html;
         },
 
+        // 🔑 Пометки за месяц — компактные, комментарий рядом с мастером
         renderMarks: function(data) {
             var allItems = [];
 
@@ -2623,8 +2681,11 @@
                     html += '<div class="mark-item ' + item.type + '">';
                     html += '<div class="date">' + item.date.slice(8) + '.' + item.date.slice(5, 7) + '</div>';
                     html += '<div class="branch-ico" title="' + (item.branch === 'ryabinina' ? 'Рябинина' : item.branch === 'amundsena' ? 'Амундсена' : '—') + '">' + branchIco + '</div>';
-                    html += '<div class="master">' + item.master + '</div>';
-                    html += '<div class="comment">' + (item.comment || '') + '</div>';
+                    // 🔑 Мастер + комментарий в одну строку
+                    html += '<div class="master-block">';
+                    html += '<span class="master">' + Utils.escapeHtml(item.master) + '</span>';
+                    if (item.comment) html += '<span class="comment">· ' + Utils.escapeHtml(item.comment) + '</span>';
+                    html += '</div>';
                     html += '<div class="amount">' + Utils.fmtMoney(item.amount) + '</div>';
                     html += '<div class="type">' + typeLabel + '</div>';
                     if (item.readonly) html += '<button class="del disabled" disabled title="Из кассы">🔒</button>';
@@ -2638,7 +2699,6 @@
                 btn.addEventListener('click', function() {
                     Api.deleteMark(btn.dataset.markDel).then(function() {
                         UI.toast('Пометка удалена', 'success');
-                        // 🔑 Чистим кэш текущего месяца
                         State.salaryMonthData = null;
                         State.salaryMonthLoadedKey = null;
                         SalaryCache.clear(State.zarpYear + '_' + State.zarpMonth);
@@ -2669,7 +2729,7 @@
 
             var sel = UI.$('markMaster');
             var optionsHtml = '<option value="">— выберите —</option>';
-            State.mastersList.forEach(function(m) { optionsHtml += '<option value="' + m.name + '">' + m.name + '</option>'; });
+            State.mastersList.forEach(function(m) { optionsHtml += '<option value="' + Utils.escapeHtml(m.name) + '">' + Utils.escapeHtml(m.name) + '</option>'; });
             sel.innerHTML = optionsHtml;
 
             UI.$('markModal').classList.add('show');
@@ -2692,7 +2752,6 @@
                     if (res && !res.error) {
                         UI.toast('Пометка добавлена', 'success');
                         Zarp.closeModal();
-                        // 🔑 Чистим кэш текущего месяца
                         State.salaryMonthData = null;
                         State.salaryMonthLoadedKey = null;
                         SalaryCache.clear(State.zarpYear + '_' + State.zarpMonth);
@@ -2870,10 +2929,10 @@
                 var cls = client.rating === 'good' ? 'good' : client.rating === 'bad' ? 'bad' : 'neutral';
                 hint.innerHTML =
                     '<div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px">' +
-                        '<span>Клиент: <span class="name">' + client.name + '</span></span>' +
+                        '<span>Клиент: <span class="name">' + Utils.escapeHtml(client.name) + '</span></span>' +
                         '<span class="rating-big ' + cls + '">' + stars + '</span>' +
                     '</div>' +
-                    '<div style="margin-top:6px;font-size:11px;color:var(--text-2)">🚗 ' + carsList + ' · 📊 ' + client.visits + ' визитов</div>' +
+                    '<div style="margin-top:6px;font-size:11px;color:var(--text-2)">🚗 ' + Utils.escapeHtml(carsList) + ' · 📊 ' + client.visits + ' визитов</div>' +
                     '<div class="actions">' +
                         '<button type="button" onclick="App.fillClient()">✓ Заполнить</button>' +
                         '<button type="button" onclick="App.dismissAutocomplete()">✕ Пропустить</button>' +
@@ -2917,7 +2976,7 @@
                 var chip = document.createElement('button');
                 chip.type = 'button';
                 chip.className = 'car-chip';
-                chip.innerHTML = brand + ' <span>' + count + '</span>';
+                chip.innerHTML = Utils.escapeHtml(brand) + ' <span>' + count + '</span>';
                 chip.addEventListener('click', function() {
                     el.querySelectorAll('.car-chip').forEach(function(c) { c.classList.remove('active'); });
                     chip.classList.add('active');
