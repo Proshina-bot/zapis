@@ -1,22 +1,21 @@
 /* ============================================================
- * PRO-шина · CRM — app.js v2.5
- * Локальный кэш только для подтверждённых сервером данных
- * Ленивая загрузка Тетрадки и Зарплат
+ * PRO-шина · CRM — app.js v2.6
  * Правки:
- *  - Репутация клиента (компактно)
- *  - Зарплаты мастеров в Тетрадке — карточки на мобильном
- *  - Пометки за месяц — единые для двух филиалов, с иконкой
- *  - Машины: input «Скрыть N машин» + кнопка «Показать все»
+ *  - Телефон: предзаполнение "+7 ( "
+ *  - Ввод в авансах/подкачке/расходах: без потери фокуса
+ *  - Записи на сегодня: рейтинг клиента
+ *  - Прайс на мобильном: без дублей
+ *  - Услуги авто на мобильном: в столбик
+ *  - Крестики авансов/расходов в одну строку
+ *  - Пометки за месяц — в одну строку на мобильном
+ *  - Фикс: сохранение extra-комментария больше не затирает _payment
  * ============================================================ */
 
 (function() {
     'use strict';
 
-    // ================================================================
-    // ⚙️ CONFIG
-    // ================================================================
     var Config = {
-        APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbx9pV5or2NUd1rIzUylc0G7N4OmEfyZcK67D_jp0l2dzsruQaH4fQIz3_Roo-fvjjeR/exec', // ← ЗАМЕНИТЕ
+        APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbx9pV5or2NUd1rIzUylc0G7N4OmEfyZcK67D_jp0l2dzsruQaH4fQIz3_Roo-fvjjeR/exec',
         CARS: ['1', '2', '3'],
         SIZES: ['R13','R14','R15','R16','R17','R18','R19','R20','R21','R22','R23'],
         REFRESH_INTERVAL: 60000,
@@ -25,12 +24,10 @@
         MAX_RETRIES: 2,
         AUTOSAVE_INTERVAL: 30000,
         LOCAL_CACHE_KEY: 'proshina_cache_v4',
-        LOCAL_CACHE_MAX_AGE: 600000
+        LOCAL_CACHE_MAX_AGE: 600000,
+        PHONE_PREFIX: '+7 ( '
     };
 
-    // ================================================================
-    // 💾 LOCAL CACHE
-    // ================================================================
     var LocalCache = {
         save: function(data) {
             try {
@@ -60,9 +57,6 @@
         }
     };
 
-    // ================================================================
-    // 🗄 STATE
-    // ================================================================
     var State = {
         occupiedSlots: {},
         clientsDatabase: {},
@@ -84,7 +78,6 @@
         tetradka: { ryabinina: null, amundsena: null },
         tetradkaLoaded: { ryabinina: false, amundsena: false },
         hideProcessedRecords: false,
-        // 🔑 новое: сколько машин скрыть (сверху списка)
         carsHideCount: 0,
 
         zarpBranch: 'ryabinina',
@@ -98,9 +91,6 @@
         bootstrapInFlight: null
     };
 
-    // ================================================================
-    // 🌐 API
-    // ================================================================
     var Api = {
         _fetchWithTimeout: function(url, timeout) {
             return new Promise(function(resolve, reject) {
@@ -115,7 +105,6 @@
                     .catch(function(e) { clearTimeout(timer); reject(e); });
             });
         },
-
         _fetch: function(params, retries, timeout) {
             retries = (retries === undefined) ? Config.MAX_RETRIES : retries;
             timeout = timeout || Config.FETCH_TIMEOUT;
@@ -135,7 +124,6 @@
             }
             return tryOnce();
         },
-
         getBootstrap: function() {
             if (State.bootstrapInFlight) return State.bootstrapInFlight;
             State.bootstrapInFlight = Api._fetch({ action: 'getBootstrap' }, 2, 25000).then(function(r) {
@@ -145,13 +133,10 @@
             });
             return State.bootstrapInFlight;
         },
-
         getAll: function() { return Api._fetch({ action: 'getAll' }); },
         createRecord: function(data) { return Api._fetch(Object.assign({ action: 'new' }, data), 1); },
         deleteRecord: function(slotKey) { return Api._fetch({ action: 'delete', slotKey: slotKey }, 1); },
-        moveRecord: function(oldKey, newKey, data) {
-            return Api._fetch(Object.assign({ action: 'move', oldSlotKey: oldKey, newSlotKey: newKey }, data), 1);
-        },
+        moveRecord: function(oldKey, newKey, data) { return Api._fetch(Object.assign({ action: 'move', oldSlotKey: oldKey, newSlotKey: newKey }, data), 1); },
         saveExtra: function(slotKey, extraComment, rating, phone) {
             return Api._fetch({ action: 'saveExtraComment', slotKey: slotKey, extraComment: extraComment, rating: rating, phone: phone }, 1);
         },
@@ -163,17 +148,10 @@
         addMark: function(data) { return Api._fetch(Object.assign({ action: 'addMark' }, data), 1); },
         deleteMark: function(id) { return Api._fetch({ action: 'deleteMark', id: id }, 1); },
         closeMonth: function(data) { return Api._fetch(Object.assign({ action: 'closeMonth' }, data), 1, 30000); },
-        updateRecordStatus: function(recordKey, status) {
-            return Api._fetch({ action: 'updateRecordStatus', recordKey: recordKey, status: status }, 1);
-        },
-        getRecordPayment: function(recordKey) {
-            return Api._fetch({ action: 'getRecordPayment', recordKey: recordKey });
-        }
+        updateRecordStatus: function(recordKey, status) { return Api._fetch({ action: 'updateRecordStatus', recordKey: recordKey, status: status }, 1); },
+        getRecordPayment: function(recordKey) { return Api._fetch({ action: 'getRecordPayment', recordKey: recordKey }); }
     };
 
-    // ================================================================
-    // 🔧 UTILS
-    // ================================================================
     var Utils = {
         normalizeSlotKey: function(key) {
             if (!key) return '';
@@ -193,12 +171,20 @@
             return out;
         },
         formatPhone: function(value) {
+            // Оставляем как есть если ввод "пустой" после "+7 ( "
             var d = value.replace(/\D/g, '');
+            if (d.length === 0) return Config.PHONE_PREFIX;
+            if (d.length === 1 && d === '7') return Config.PHONE_PREFIX;
+            // Убираем ведущую 7 или 8
+            if (d[0] === '7' || d[0] === '8') d = d.substring(1);
+            // Теперь d — это 10 цифр
+            d = d.substring(0, 10);
             var r = '+7';
-            if (d.length > 1) r += ' (' + d.substring(1, 4); else r += ' (';
-            if (d.length >= 5) r += ') ' + d.substring(4, 7);
-            if (d.length >= 8) r += '-' + d.substring(7, 9);
-            if (d.length >= 10) r += '-' + d.substring(9, 11);
+            if (d.length > 0) r += ' (' + d.substring(0, 3);
+            else r += ' (';
+            if (d.length >= 4) r += ') ' + d.substring(3, 6);
+            if (d.length >= 7) r += '-' + d.substring(6, 8);
+            if (d.length >= 9) r += '-' + d.substring(8, 10);
             return r;
         },
         cleanPhone: function(p) { return p ? p.replace(/\D/g, '') : ''; },
@@ -272,15 +258,20 @@
         fmtMoney: function(n) {
             n = Number(n) || 0;
             return n.toLocaleString('ru-RU') + ' ₽';
+        },
+        // 🔑 Мержим _payment из старых данных в новые (для saveExtra)
+        mergePayment: function(newSlots, oldSlots) {
+            Object.keys(newSlots).forEach(function(key) {
+                if (oldSlots[key] && oldSlots[key]._payment && !newSlots[key]._payment) {
+                    newSlots[key]._payment = oldSlots[key]._payment;
+                }
+            });
+            return newSlots;
         }
     };
 
-    // ================================================================
-    // 🎨 UI
-    // ================================================================
     var UI = {
         $: function(id) { return document.getElementById(id); },
-
         toast: function(message, type, duration) {
             type = type || 'info';
             duration = duration || 3000;
@@ -294,7 +285,6 @@
                 setTimeout(function() { el.remove(); }, 300);
             }, duration);
         },
-
         setLoading: function(btnId, loading, textId, loadingText) {
             var btn = UI.$(btnId);
             if (!btn) return;
@@ -307,7 +297,6 @@
                 if (btn.dataset.originalText) textEl.textContent = btn.dataset.originalText;
             }
         },
-
         skeletonSlots: function(count) {
             count = count || 6;
             var html = '';
@@ -316,7 +305,6 @@
             }
             return html;
         },
-
         updateLoadIndicator: function(percent) {
             var el = UI.$('loadIndicator');
             var txt = UI.$('loadText');
@@ -331,9 +319,6 @@
         }
     };
 
-    // ================================================================
-    // 💳 PAYMENTS
-    // ================================================================
     var Payments = {
         data: {
             bn:      { label: 'Б/Н' },
@@ -351,6 +336,15 @@
     // 📝 NEW RECORD
     // ================================================================
     var NewRecord = {
+        // 🔑 Инициализация телефона с префиксом
+        initPhone: function() {
+            var el = UI.$('phone');
+            if (!el) return;
+            if (!el.value || el.value.trim() === '' || el.value.trim() === '+7') {
+                el.value = Config.PHONE_PREFIX;
+            }
+        },
+
         init: function() {
             flatpickr(UI.$('datePicker'), {
                 dateFormat: 'Y-m-d',
@@ -405,7 +399,17 @@
             });
             UI.$('sizesGrid').appendChild(sizesFragment);
 
-            UI.$('phone').addEventListener('input', function() {
+            // 🔑 Телефон: префикс + форматирование
+            var phoneEl = UI.$('phone');
+            NewRecord.initPhone();
+            phoneEl.addEventListener('focus', function() {
+                if (!this.value || this.value.trim() === '' || this.value.trim() === '+7') {
+                    this.value = Config.PHONE_PREFIX;
+                    // Курсор в конец
+                    setTimeout(function() { phoneEl.setSelectionRange(phoneEl.value.length, phoneEl.value.length); }, 0);
+                }
+            });
+            phoneEl.addEventListener('input', function() {
                 this.value = Utils.formatPhone(this.value);
                 App.checkClientByPhone();
                 NewRecord.updateSubmitState();
@@ -418,14 +422,12 @@
 
         renderServicesGrid: function() {
             if (!State.currentBranch) State.currentBranch = 'ryabinina';
-
             var list = State.currentBranch === 'ryabinina'
                 ? ['Комплекс', 'СУ+Баланс', 'Ремонт', 'Правка']
                 : ['Комплекс', 'СУ+Баланс', 'Ремонт', 'Правка', 'Кондиционер', 'Слесарка'];
 
             var grid = UI.$('servicesGrid');
             if (!grid) return;
-
             grid.innerHTML = '';
             State.selectedServices = [];
             var fragment = document.createDocumentFragment();
@@ -642,7 +644,7 @@
         },
 
         resetForm: function() {
-            UI.$('phone').value = '';
+            UI.$('phone').value = Config.PHONE_PREFIX; // 🔑 сброс к префиксу
             UI.$('clientName').value = '';
             UI.$('carBrand').value = '';
             UI.$('comment').value = '';
@@ -660,7 +662,7 @@
     };
 
     // ================================================================
-    // 📋 RECORDS (модалка)
+    // 📋 RECORDS
     // ================================================================
     var Records = {
         openModal: function(slotKey) {
@@ -746,9 +748,14 @@
                 var extra = UI.$('recExtraComment').value.trim();
                 var newRatingVal = newRating || 'neutral';
 
+                // 🔑 Сохраняем старый _payment
+                var oldSlots = State.occupiedSlots;
+
                 Api.saveExtra(slotKey, extra, newRatingVal, data.phone || '').then(function(res) {
                     if (res && !res.error) {
-                        State.occupiedSlots = Utils.normalizeAllKeys(res);
+                        var newSlots = Utils.normalizeAllKeys(res);
+                        // 🔑 Мёржим _payment из старых данных
+                        State.occupiedSlots = Utils.mergePayment(newSlots, oldSlots);
                         App.rebuildClients();
                         App.saveToCache();
                         NewRecord.renderSlots();
@@ -1131,12 +1138,15 @@
                 .filter(function(e) { return Utils.cleanPhone(e[1].phone) === phone; })
                 .map(function(e) { return e[0]; });
 
+            var oldSlots = State.occupiedSlots;
+
             Promise.all(keys.map(function(k) {
                 return Api.saveExtra(k, State.occupiedSlots[k].extraComment || '', target, State.occupiedSlots[k].phone || '');
             })).then(function(results) {
                 for (var i = results.length - 1; i >= 0; i--) {
                     if (results[i] && !results[i].error) {
-                        State.occupiedSlots = Utils.normalizeAllKeys(results[i]);
+                        var newSlots = Utils.normalizeAllKeys(results[i]);
+                        State.occupiedSlots = Utils.mergePayment(newSlots, oldSlots);
                         break;
                     }
                 }
@@ -1189,6 +1199,7 @@
             }
 
             var sizesToShow = Config.SIZES;
+            // 🔑 Только desktop-разметка. На мобильном CSS скроет .price-category и покажет .price-mobile
             var html = '';
             var mobileHtml = '';
 
@@ -1288,7 +1299,6 @@
                 if (d) Tetradka.renderRecords(d);
             });
 
-            // 🔑 НОВОЕ: скрыть N машин
             UI.$('applyHideCarsBtn').addEventListener('click', function() {
                 var input = UI.$('carsHideInput');
                 var val = parseInt(input.value, 10);
@@ -1301,7 +1311,6 @@
                 Tetradka.renderCars(d);
             });
 
-            // 🔑 НОВОЕ: показать все
             UI.$('showAllCarsBtn').addEventListener('click', function() {
                 State.carsHideCount = 0;
                 UI.$('carsHideInput').value = 0;
@@ -1344,7 +1353,9 @@
                     payment: 'cash'
                 });
                 Tetradka.markDirty();
-                Tetradka.renderAll();
+                // 🔑 После добавления — перерисовка один раз (новый элемент, фокус не важен)
+                Tetradka.renderAdvances(d);
+                Tetradka.renderCash(d);
             });
 
             UI.$('addExpenseBtn').addEventListener('click', function() {
@@ -1352,7 +1363,8 @@
                 if (!d) return;
                 d.cash.expenses.push({ id: 'exp_' + Date.now(), description: '', amount: 0 });
                 Tetradka.markDirty();
-                Tetradka.renderAll();
+                Tetradka.renderExpenses(d);
+                Tetradka.renderCash(d);
             });
 
             UI.$('cashStart').addEventListener('input', function() {
@@ -1360,7 +1372,7 @@
                 if (d) {
                     d.cash.start_cash = Number(this.value) || 0;
                     Tetradka.markDirty();
-                    Tetradka.renderCash(d);
+                    Tetradka.updateCashDisplay(d);
                 }
             });
 
@@ -1684,6 +1696,7 @@
                     phone: v.phone || '',
                     comment: v.comment || '',
                     extraComment: v.extraComment || '',
+                    rating: v.rating || 'neutral',
                     status: 'pending',
                     linkedCarId: null
                 });
@@ -1707,6 +1720,7 @@
             Tetradka.renderCash(d);
         },
 
+        // ============ ЗАПИСИ НА СЕГОДНЯ + рейтинг клиента ============
         renderRecords: function(d) {
             var html = '';
             var allRecords = d.records || [];
@@ -1725,11 +1739,27 @@
             records.forEach(function(r) {
                 var cls = r.status === 'confirmed' ? 'done' : r.status === 'declined' ? 'declined' : 'pending';
                 var hasComment = r.comment || r.extraComment;
+
+                // 🔑 Рейтинг клиента
+                var phone = Utils.cleanPhone(r.phone || '');
+                var client = State.clientsDatabase[phone];
+                var ratingNum = '', ratingCls = 'neutral';
+                if (client) {
+                    ratingNum = Utils.formatRating(client);
+                    if (client.rating === 'good') ratingCls = 'good';
+                    else if (client.rating === 'bad') ratingCls = 'bad';
+                }
+
                 html += '<div class="rec-compact ' + cls + '">';
                 html += '<div class="time">' + r.time + '</div>';
                 html += '<div class="info" data-open-record="' + r.key + '">';
                 html += '<div class="car">' + r.car + '</div>';
-                html += '<div class="client">' + r.client + '</div>';
+                html += '<div class="client-line">';
+                html += '<span class="client">' + (r.client || '—') + '</span>';
+                if (ratingNum) {
+                    html += '<span class="rec-rating ' + ratingCls + '">' + ratingNum + '</span>';
+                }
+                html += '</div>';
                 if (r.phone) html += '<div class="phone">' + r.phone + '</div>';
                 html += '</div>';
                 html += '<div class="actions">';
@@ -1802,6 +1832,7 @@
             });
         },
 
+        // ============ ПОДКАЧКА — без перерисовки input ============
         renderPump: function(d) {
             var html = '';
             var total = 0;
@@ -1810,19 +1841,28 @@
                 total += val;
                 html += '<div class="pump-row"><div class="label">' + Payments.label(code) + '</div><input type="number" value="' + val + '" min="0" step="25" data-pump="' + code + '"></div>';
             });
-            html += '<div class="pump-row total"><div class="label">ИТОГО</div><div style="text-align:right;font-weight:800;color:var(--accent)">' + Utils.fmtMoney(total) + '</div></div>';
+            html += '<div class="pump-row total"><div class="label">ИТОГО</div><div style="text-align:right;font-weight:800;color:var(--accent)" id="pumpTotalInline">' + Utils.fmtMoney(total) + '</div></div>';
             UI.$('pumpTable').innerHTML = html;
             UI.$('pumpTotal').textContent = Utils.fmtMoney(total);
 
             document.querySelectorAll('[data-pump]').forEach(function(inp) {
                 inp.addEventListener('input', function() {
-                    d.pump[inp.dataset.pump] = Number(inp.value) || 0;
+                    var val = Number(inp.value) || 0;
+                    d.pump[inp.dataset.pump] = val;
                     Tetradka.markDirty();
-                    Tetradka.renderPump(d);
+                    // 🔑 НЕ перерисовываем — только обновляем итоги
+                    Tetradka.updatePumpTotal(d);
                     Tetradka.renderTotals(d);
-                    Tetradka.renderCash(d);
+                    Tetradka.updateCashDisplay(d);
                 });
             });
+        },
+
+        updatePumpTotal: function(d) {
+            var total = Object.keys(d.pump).reduce(function(s, k) { return s + (d.pump[k] || 0); }, 0);
+            var el = UI.$('pumpTotalInline');
+            if (el) el.textContent = Utils.fmtMoney(total);
+            UI.$('pumpTotal').textContent = Utils.fmtMoney(total);
         },
 
         renderMasters: function(d) {
@@ -1904,7 +1944,6 @@
             });
         },
 
-        // ============ МАШИНЫ — СКРЫТИЕ ПЕРВЫХ N ============
         renderCars: function(d) {
             var html = '';
             var svcOptions = d.services
@@ -1913,19 +1952,17 @@
             var paymentCodes = Payments.all();
 
             var total = d.cars.length;
-            // 🔑 Скрываем первые State.carsHideCount машин
             var hideCount = Math.min(State.carsHideCount || 0, total);
             var visibleCars = d.cars.slice(hideCount);
 
             UI.$('carsCount').textContent = total + ' ' + (total === 1 ? 'машина' : 'машин') +
                 (hideCount > 0 ? ' (скрыто ' + hideCount + ')' : '');
 
-            // Обновляем input
             var input = UI.$('carsHideInput');
             if (input && Number(input.value) !== hideCount) input.value = hideCount;
 
             visibleCars.forEach(function(c, idx) {
-                var originalIdx = hideCount + idx; // индекс в общем массиве
+                var originalIdx = hideCount + idx;
                 var linked = c.recordKey ? 'linked' : '';
                 var carTotal = c.services.reduce(function(s, x) { return s + (Number(x.amount) || 0); }, 0);
                 var hasRecord = !!c.recordKey;
@@ -2020,7 +2057,7 @@
                         Tetradka.markDirty();
                         Tetradka.renderTotals(d);
                         Tetradka.renderSalary(d);
-                        Tetradka.renderCash(d);
+                        Tetradka.updateCashDisplay(d);
                     }
                 });
             });
@@ -2070,7 +2107,6 @@
             UI.$('paymentsTotals').innerHTML = html;
         },
 
-        // ============ ЗАРПЛАТА МАСТЕРОВ — ТАБЛИЦА + КАРТОЧКИ МОБИЛЬНЫЕ ============
         renderSalary: function(d) {
             var activeMasters = d.masters.filter(function(m) { return d.mastersOnShift[m.name]; });
             var serviceSums = {};
@@ -2090,7 +2126,6 @@
                 serviceSums['подкачка'] += pumpTotal;
             }
 
-            // --- Таблица (десктоп) ---
             var headHtml = '<tr><th>Услуга</th>';
             activeMasters.forEach(function(m) { headHtml += '<th>' + m.name + '</th>'; });
             headHtml += '</tr>';
@@ -2124,8 +2159,6 @@
             }
             UI.$('salaryBody').innerHTML = bodyHtml;
 
-            // --- Карточки (мобильные) ---
-            // Находим контейнер .salary-wrap
             var wrap = document.querySelector('.salary-wrap');
             if (!wrap) return;
             var existing = wrap.querySelector('.salary-cards-mobile');
@@ -2159,6 +2192,7 @@
             wrap.appendChild(cardsWrap);
         },
 
+        // 🔑 АВАНСЫ — без перерисовки на input, только обновление кассы
         renderAdvances: function(d) {
             var html = '';
             var total = 0;
@@ -2172,7 +2206,6 @@
                 });
                 html += '</select>';
                 html += '<input type="number" class="amount" value="' + a.amount + '" min="0" step="100" data-adv-amount="' + a.id + '" placeholder="Сумма">';
-                html += '<div class="spacer"></div>';
                 html += '<button class="del" data-adv-del="' + a.id + '">✕</button>';
                 html += '</div>';
             });
@@ -2193,8 +2226,9 @@
                         a.amount = Number(inp.value) || 0;
                         a.payment = 'cash';
                         Tetradka.markDirty();
-                        Tetradka.renderAdvances(d);
-                        Tetradka.renderCash(d);
+                        // 🔑 НЕ перерисовываем всё — только обновляем итоги и кассу
+                        Tetradka.updateAdvancesTotal(d);
+                        Tetradka.updateCashDisplay(d);
                     }
                 });
             });
@@ -2207,6 +2241,12 @@
             });
         },
 
+        updateAdvancesTotal: function(d) {
+            var total = d.advances.reduce(function(s, a) { return s + (Number(a.amount) || 0); }, 0);
+            UI.$('advancesTotal').textContent = Utils.fmtMoney(total);
+        },
+
+        // 🔑 РАСХОДЫ — без перерисовки на input
         renderExpenses: function(d) {
             var html = '';
             var total = 0;
@@ -2215,7 +2255,6 @@
                 html += '<div class="cash-list-item">';
                 html += '<input type="text" value="' + (e.description || '') + '" placeholder="на что" data-exp-desc="' + e.id + '">';
                 html += '<input type="number" class="amount" value="' + (e.amount || 0) + '" min="0" step="100" data-exp-amount="' + e.id + '">';
-                html += '<div class="spacer"></div>';
                 html += '<button class="del" data-exp-del="' + e.id + '">✕</button>';
                 html += '</div>';
             });
@@ -2232,7 +2271,13 @@
             document.querySelectorAll('[data-exp-amount]').forEach(function(inp) {
                 inp.addEventListener('input', function() {
                     var e = d.cash.expenses.find(function(x) { return x.id === inp.dataset.expAmount; });
-                    if (e) { e.amount = Number(inp.value) || 0; Tetradka.markDirty(); Tetradka.renderExpenses(d); Tetradka.renderCash(d); }
+                    if (e) {
+                        e.amount = Number(inp.value) || 0;
+                        Tetradka.markDirty();
+                        // 🔑 НЕ перерисовываем — только итоги и кассу
+                        Tetradka.updateExpensesTotal(d);
+                        Tetradka.updateCashDisplay(d);
+                    }
                 });
             });
             document.querySelectorAll('[data-exp-del]').forEach(function(btn) {
@@ -2244,7 +2289,13 @@
             });
         },
 
-        renderCash: function(d) {
+        updateExpensesTotal: function(d) {
+            var total = (d.cash.expenses || []).reduce(function(s, e) { return s + (Number(e.amount) || 0); }, 0);
+            UI.$('expensesTotal').textContent = Utils.fmtMoney(total);
+        },
+
+        // 🔑 ОБНОВЛЕНИЕ КАССЫ БЕЗ ПЕРЕРИСОВКИ ВСЕГО
+        updateCashDisplay: function(d) {
             var incomeCash = d.pump.cash || 0;
             d.cars.forEach(function(c) {
                 c.services.forEach(function(svc) {
@@ -2262,6 +2313,10 @@
             UI.$('cashExpenses').textContent = Utils.fmtMoney(expensesSum);
             UI.$('cashTotal').textContent = Utils.fmtMoney(total);
             if (UI.$('cashStart').value != d.cash.start_cash) UI.$('cashStart').value = d.cash.start_cash;
+        },
+
+        renderCash: function(d) {
+            Tetradka.updateCashDisplay(d);
         }
     };
 
@@ -2484,10 +2539,7 @@
             UI.$('combinedBody').innerHTML = html;
         },
 
-        // ============ ПОМЕТКИ — ЕДИНЫЕ ДЛЯ ДВУХ ФИЛИАЛОВ ============
         renderMarks: function(data) {
-            // 🔑 НЕ фильтруем по branch — показываем ВСЕ пометки
-            // Иконка филиала видна в каждой строке
             var allItems = [];
 
             (data.advances || []).forEach(function(a) {
