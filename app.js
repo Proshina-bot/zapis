@@ -10,7 +10,7 @@
     // ⚙️ CONFIG
     // ================================================================
     var Config = {
-        APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbzMHJUob-wHhhNwjhxK2BLlLaQVT8cJtR-CZOU_vUqukrSMrMOk7mAaXTUF0YSn3MGw/exec', // ← ЗАМЕНИТЕ
+        APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbzcxPNFhdNfeM_W3SJcDqivV7Tk1hf2DgUM9_wF_xbx05FYx4ig9tqAEfOUF2Sn-HFA/exec', // ← ЗАМЕНИТЕ
         CARS: ['1', '2', '3'],
         SIZES: ['R13','R14','R15','R16','R17','R18','R19','R20','R21','R22','R23'],
         REFRESH_INTERVAL: 30000,      // общий фон-поллинг (30 сек)
@@ -556,17 +556,20 @@ selectSlot: function(time, car) {
             el.classList.add('show');
         },
 
-        updateSubmitState: function() {
-            var phoneEl = UI.$('phone');
-            var submitEl = UI.$('submitBtn');
-            if (!phoneEl || !submitEl) return;
-            var phone = phoneEl.value.replace(/\D/g, '');
-            var ready = State.currentSelection.slotKey &&
-                        State.selectedServices.length > 0 &&
-                        State.selectedSize &&
-                        phone.length >= 11;
-            submitEl.disabled = !ready;
-        },
+updateSubmitState: function() {
+    var phoneEl = UI.$('phone');
+    var submitEl = UI.$('submitBtn');
+    if (!phoneEl || !submitEl) return;
+    var phone = phoneEl.value.replace(/\D/g, '');
+    var hasSlot = !!State.currentSelection.slotKey;
+    var hasServices = State.selectedServices.length > 0;
+    var hasSize = !!State.selectedSize;
+    var hasPhone = phone.length >= 11;
+    var ready = hasSlot && hasServices && hasSize && hasPhone;
+    submitEl.disabled = !ready;
+    // ОТЛАДКА — откройте консоль и увидите, чего не хватает
+    console.log('Submit:', { hasSlot, hasServices, hasSize, hasPhone, phone: phone.length, services: State.selectedServices, size: State.selectedSize });
+},
 
         submit: function() {
             var phone = UI.$('phone').value.trim();
