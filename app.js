@@ -491,6 +491,7 @@
                             else if (rating === 'bad') cls += 'bad';
                             else cls += 'no-rating';
                             slot.className = cls;
+                            slot.dataset.slotKey = slotKey;
                             slot.innerHTML =
                                 '<span class="brand">' + (occ.carBrand || '???') + '</span>' +
                                 (servicesLine ? '<span class="services-line">' + servicesLine + '</span>' : '') +
@@ -504,11 +505,14 @@
                                 Records.openModal(slotKey);
                             });
                         } else {
-                            freeCount++;
-                            slot.className = 'slot free';
-                            slot.textContent = 'ПУСТО';
-                            slot.addEventListener('click', function() { NewRecord.selectSlot(time, car); });
-                        }
+    freeCount++;
+    slot.className = 'slot free';
+    slot.textContent = 'ПУСТО';
+    slot.dataset.time = time;
+    slot.dataset.car = car;
+    slot.dataset.slotKey = slotKey;
+    slot.addEventListener('click', function() { NewRecord.selectSlot(time, car); });
+}
                         slotsRow.appendChild(slot);
                     });
                 }
@@ -525,24 +529,21 @@
             App.updateStats();
         },
 
-        selectSlot: function(time, car) {
-            document.querySelectorAll('.slot.free').forEach(function(s) { s.classList.remove('selected'); });
-            var slots = Utils.getTimeSlots(UI.$('datePicker').value);
-            var timeIdx = slots.indexOf(time);
-            var carIdx = Config.CARS.indexOf(car);
-            var targetIdx = timeIdx * Config.CARS.length + carIdx;
-            var all = document.querySelectorAll('.slot.free');
-            if (all[targetIdx]) all[targetIdx].classList.add('selected');
+selectSlot: function(time, car) {
+    document.querySelectorAll('.slot.free').forEach(function(s) { s.classList.remove('selected'); });
+    // Ищем слот по data-атрибутам — надёжно
+    var slot = document.querySelector('.slot.free[data-time="' + time + '"][data-car="' + car + '"]');
+    if (slot) slot.classList.add('selected');
 
-            State.currentSelection = {
-                date: UI.$('datePicker').value,
-                time: time,
-                car: car,
-                slotKey: Utils.normalizeSlotKey(State.currentBranch + '_' + UI.$('datePicker').value + '_' + time + '_' + car)
-            };
-            NewRecord.renderInfoBanner();
-            NewRecord.updateSubmitState();
-        },
+    State.currentSelection = {
+        date: UI.$('datePicker').value,
+        time: time,
+        car: car,
+        slotKey: Utils.normalizeSlotKey(State.currentBranch + '_' + UI.$('datePicker').value + '_' + time + '_' + car)
+    };
+    NewRecord.renderInfoBanner();
+    NewRecord.updateSubmitState();
+},
 
         renderInfoBanner: function() {
             var el = UI.$('slotInfoBanner');
@@ -1554,13 +1555,22 @@
             var servicesMap = {};
             servicesMap['шиномонтаж'] = { name: 'шиномонтаж', percents: {}, fixed: true };
             servicesMap['подкачка'] = { name: 'подкачка', percents: {}, fixed: true };
-            var mastersOnShift = {};
+var mastersOnShift = {};
 
-            (res.masters || []).forEach(function(m) {
-                if (!servicesMap[m.service]) servicesMap[m.service] = { name: m.service, percents: {}, fixed: false };
-                servicesMap[m.service].percents[m.master] = m.percent;
-                mastersOnShift[m.master] = true;
-            });
+// 🆕 Если уже есть данные за этот день (например, был в State) — сохраняем отметки
+var existing = State.tetradka[branch];
+if (existing && existing.date === date && existing.mastersOnShift) {
+    Object.keys(existing.mastersOnShift).forEach(function(k) {
+        if (existing.mastersOnShift[k]) mastersOnShift[k] = true;
+    });
+}
+
+// Добавляем тех, у кого есть записи в SalaryDays (гарантированно на смене)
+(res.masters || []).forEach(function(m) {
+    if (!servicesMap[m.service]) servicesMap[m.service] = { name: m.service, percents: {}, fixed: false };
+    servicesMap[m.service].percents[m.master] = m.percent;
+    mastersOnShift[m.master] = true;
+});
 
             var cars = (res.cars || []).map(function(c) {
                 var total = (c.services || []).reduce(function(s, x) { return s + (Number(x.amount) || 0); }, 0);
@@ -1764,26 +1774,35 @@
         },
 
         // ============ МАСТЕРА НА СМЕНЕ ============
-        renderMasters: function(d) {
-            var html = '';
-            d.masters.forEach(function(m) {
-                var on = d.mastersOnShift[m.name] ? 'on' : '';
-                html += '<div class="master-toggle ' + on + '" data-master="' + m.name + '"><span class="dot"></span><span>' + m.name + '</span></div>';
-            });
-            UI.$('mastersRow').innerHTML = html;
-            var count = Object.keys(d.mastersOnShift).filter(function(k) { return d.mastersOnShift[k]; }).length;
-            UI.$('mastersCount').textContent = count + ' выбрано';
+renderMasters: function(d) {
+    var html = '';
+    d.masters.forEach(function(m) {
+        var on = d.mastersOnShift[m.name] ? 'on' : '';
+        html += '<div class="master-toggle ' + on + '" data-master="' + m.name + '"><span class="dot"></span><span>' + m.name + '</span></div>';
+    });
+    UI.$('mastersRow').innerHTML = html;
+    var count = Object.keys(d.mastersOnShift).filter(function(k) { return d.mastersOnShift[k]; }).length;
+    UI.$('mastersCount').textContent = count + ' выбрано';
 
-            document.querySelectorAll('[data-master]').forEach(function(el) {
-                el.addEventListener('click', function() {
-                    var name = el.dataset.master;
-                    if (d.mastersOnShift[name]) delete d.mastersOnShift[name];
-                    else d.mastersOnShift[name] = true;
-                    Tetradka.markDirty();
-                    Tetradka.renderAll();
-                });
-            });
-        },
+    document.querySelectorAll('[data-master]').forEach(function(el) {
+        el.addEventListener('click', function() {
+            var name = el.dataset.master;
+            // toggle с проверкой
+            if (d.mastersOnShift[name]) {
+                delete d.mastersOnShift[name];
+            } else {
+                d.mastersOnShift[name] = true;
+            }
+            // 🆕 НЕ рендерим всё — обновляем только галочку этой кнопки
+            el.classList.toggle('on', !!d.mastersOnShift[name]);
+            var newCount = Object.keys(d.mastersOnShift).filter(function(k) { return d.mastersOnShift[k]; }).length;
+            UI.$('mastersCount').textContent = newCount + ' выбрано';
+            Tetradka.markDirty();
+            Tetradka.renderServices(d);  // обновить столбцы услуг
+            Tetradka.renderSalary(d);
+        });
+    });
+},
 
         // ============ УСЛУГИ И % ============
         renderServices: function(d) {
