@@ -1779,23 +1779,24 @@ body {
 }
 
 /* ============ РЕЙТИНГ (форма) ============ */
-.rating-block { display: flex; gap: 8px; }
+.rating-block { display: inline-flex; gap: 6px; }
 .rating-btn {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    padding: 14px 12px;
+    width: 44px;
+    height: 40px;
+    padding: 0;
     border-radius: 9px;
     border: 1px solid var(--border);
     background: var(--bg-2);
     color: var(--text-1);
     cursor: pointer;
     font-family: inherit;
-    font-size: 22px;
-    font-weight: 600;
+    font-size: 18px;
+    line-height: 1;
     transition: var(--transition);
-    flex: 1;
+    flex: 0 0 auto;
 }
 .rating-btn:hover { background: var(--bg-3); }
 .rating-btn.good.active {
@@ -2487,6 +2488,71 @@ body {
         height: 26px;
         font-size: 12px;
     }
+        /* Зарплата мастеров — карточки на мобильном */
+    #salaryTable {
+        min-width: 0;
+        width: 100%;
+    }
+    #salaryTable thead { display: none; }
+    #salaryTable tbody,
+    #salaryTable tr,
+    #salaryTable td {
+        display: block;
+        width: 100%;
+    }
+    #salaryTable tr {
+        background: var(--bg-2);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        margin-bottom: 8px;
+        padding: 10px 12px;
+        position: relative;
+    }
+    #salaryTable tr.row-total {
+        background: linear-gradient(135deg, rgba(52,211,153,0.12), rgba(52,211,153,0.02));
+        border-color: var(--success-border);
+        margin-top: 12px;
+    }
+    #salaryTable td {
+        padding: 4px 0;
+        text-align: left;
+        font-size: 13px;
+        border: none;
+        white-space: normal;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        position: static;
+        background: transparent !important;
+    }
+    #salaryTable td:first-child {
+        font-weight: 800;
+        font-size: 14px;
+        color: var(--text-0);
+        padding-bottom: 8px;
+        margin-bottom: 6px;
+        border-bottom: 1px solid var(--border);
+        display: block;
+        text-align: left;
+    }
+    #salaryTable td:first-child::before { content: none; }
+    #salaryTable td:not(:first-child)::before {
+        content: attr(data-master);
+        color: var(--text-2);
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    #salaryTable td:not(:first-child) {
+        color: var(--success);
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+    }
+    #salaryTable tr.row-total td:first-child {
+        color: var(--success);
+    }
 
     /* Услуги в машине — 4 колонки, минимальная ширина */
     .car-service-inline {
@@ -2520,7 +2586,7 @@ body {
     }
 
     /* Кнопки рейтинга крупные */
-    .rating-btn { font-size: 20px; padding: 12px 10px; }
+   .rating-btn { width: 40px; height: 36px; font-size: 16px; }
 
     /* Сетка summary — 1 колонка */
     .summary-grid { grid-template-columns: 1fr; }
