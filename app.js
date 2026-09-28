@@ -1,30 +1,30 @@
 /* ============================================================
- * PRO-шина · CRM — app.js v2.6
+ * PRO-шина · CRM — app.js v2.7
  * Правки:
- *  - Телефон: предзаполнение "+7 ( "
- *  - Ввод в авансах/подкачке/расходах: без потери фокуса
- *  - Записи на сегодня: рейтинг клиента
- *  - Прайс на мобильном: без дублей
- *  - Услуги авто на мобильном: в столбик
- *  - Крестики авансов/расходов в одну строку
- *  - Пометки за месяц — в одну строку на мобильном
- *  - Фикс: сохранение extra-комментария больше не затирает _payment
+ *  - Баг с оплатой: фикс на сервере (saveExtraComment возвращает _payment)
+ *  - Зарплаты: sessionStorage-кэш для мгновенной загрузки
+ *  - Пометки: с иконкой филиала, единые для двух филиалов
+ *  - Оптимизация запросов
  * ============================================================ */
 
 (function() {
     'use strict';
 
     var Config = {
-        APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbx9pV5or2NUd1rIzUylc0G7N4OmEfyZcK67D_jp0l2dzsruQaH4fQIz3_Roo-fvjjeR/exec',
+        APPS_SCRIPT_URL: 'https://script.google.com/macros/s/ВАШ_ID/exec',
         CARS: ['1', '2', '3'],
         SIZES: ['R13','R14','R15','R16','R17','R18','R19','R20','R21','R22','R23'],
         REFRESH_INTERVAL: 60000,
         CACHE_TTL: 60000,
         FETCH_TIMEOUT: 20000,
+        FETCH_TIMEOUT_SALARY: 30000,
         MAX_RETRIES: 2,
+        MAX_RETRIES_SALARY: 1,
         AUTOSAVE_INTERVAL: 30000,
         LOCAL_CACHE_KEY: 'proshina_cache_v4',
         LOCAL_CACHE_MAX_AGE: 600000,
+        SESSION_SALARY_KEY: 'proshina_salary_month_v1',
+        SESSION_SALARY_MAX_AGE: 900000,
         PHONE_PREFIX: '+7 ( '
     };
 
@@ -54,6 +54,42 @@
         },
         clear: function() {
             try { localStorage.removeItem(Config.LOCAL_CACHE_KEY); } catch (e) {}
+        }
+    };
+
+    // 🔑 SessionStorage-кэш для зарплат (мгновенная загрузка при переключении вкладок)
+    var SalaryCache = {
+        save: function(key, data) {
+            try {
+                sessionStorage.setItem(Config.SESSION_SALARY_KEY + '_' + key, JSON.stringify({
+                    data: data,
+                    ts: Date.now()
+                }));
+            } catch (e) {}
+        },
+        load: function(key) {
+            try {
+                var raw = sessionStorage.getItem(Config.SESSION_SALARY_KEY + '_' + key);
+                if (!raw) return null;
+                var parsed = JSON.parse(raw);
+                if (!parsed.ts) return null;
+                if ((Date.now() - parsed.ts) > Config.SESSION_SALARY_MAX_AGE) {
+                    sessionStorage.removeItem(Config.SESSION_SALARY_KEY + '_' + key);
+                    return null;
+                }
+                return parsed.data;
+            } catch (e) { return null; }
+        },
+        clear: function(key) {
+            try { sessionStorage.removeItem(Config.SESSION_SALARY_KEY + '_' + key); } catch (e) {}
+        },
+        clearAll: function() {
+            try {
+                var keys = Object.keys(sessionStorage);
+                keys.forEach(function(k) {
+                    if (k.indexOf(Config.SESSION_SALARY_KEY) === 0) sessionStorage.removeItem(k);
+                });
+            } catch (e) {}
         }
     };
 
@@ -119,7 +155,7 @@
                     .catch(function(e) {
                         if (attempt >= retries) { console.warn('API:', e.message); return null; }
                         attempt++;
-                        return new Promise(function(r) { setTimeout(r, 500 * Math.pow(2, attempt - 1)); }).then(tryOnce);
+                        return new Promise(function(r) { setTimeout(r, 400); }).then(tryOnce);
                     });
             }
             return tryOnce();
@@ -144,7 +180,10 @@
         getMasters: function() { return Api._fetch({ action: 'getMasters' }); },
         getSalaryDay: function(date, branch) { return Api._fetch({ action: 'getSalaryDay', date: date, branch: branch }); },
         saveSalaryDay: function(data) { return Api._fetch(Object.assign({ action: 'saveSalaryDay' }, data), 1, 30000); },
-        getSalaryMonth: function(year, month) { return Api._fetch({ action: 'getSalaryMonth', year: year, month: month }, 2, 25000); },
+        // 🔑 Salary month: 1 retry, увеличенный timeout
+        getSalaryMonth: function(year, month) {
+            return Api._fetch({ action: 'getSalaryMonth', year: year, month: month }, Config.MAX_RETRIES_SALARY, Config.FETCH_TIMEOUT_SALARY);
+        },
         addMark: function(data) { return Api._fetch(Object.assign({ action: 'addMark' }, data), 1); },
         deleteMark: function(id) { return Api._fetch({ action: 'deleteMark', id: id }, 1); },
         closeMonth: function(data) { return Api._fetch(Object.assign({ action: 'closeMonth' }, data), 1, 30000); },
@@ -171,13 +210,10 @@
             return out;
         },
         formatPhone: function(value) {
-            // Оставляем как есть если ввод "пустой" после "+7 ( "
             var d = value.replace(/\D/g, '');
             if (d.length === 0) return Config.PHONE_PREFIX;
             if (d.length === 1 && d === '7') return Config.PHONE_PREFIX;
-            // Убираем ведущую 7 или 8
             if (d[0] === '7' || d[0] === '8') d = d.substring(1);
-            // Теперь d — это 10 цифр
             d = d.substring(0, 10);
             var r = '+7';
             if (d.length > 0) r += ' (' + d.substring(0, 3);
@@ -258,15 +294,6 @@
         fmtMoney: function(n) {
             n = Number(n) || 0;
             return n.toLocaleString('ru-RU') + ' ₽';
-        },
-        // 🔑 Мержим _payment из старых данных в новые (для saveExtra)
-        mergePayment: function(newSlots, oldSlots) {
-            Object.keys(newSlots).forEach(function(key) {
-                if (oldSlots[key] && oldSlots[key]._payment && !newSlots[key]._payment) {
-                    newSlots[key]._payment = oldSlots[key]._payment;
-                }
-            });
-            return newSlots;
         }
     };
 
@@ -336,7 +363,6 @@
     // 📝 NEW RECORD
     // ================================================================
     var NewRecord = {
-        // 🔑 Инициализация телефона с префиксом
         initPhone: function() {
             var el = UI.$('phone');
             if (!el) return;
@@ -399,13 +425,11 @@
             });
             UI.$('sizesGrid').appendChild(sizesFragment);
 
-            // 🔑 Телефон: префикс + форматирование
             var phoneEl = UI.$('phone');
             NewRecord.initPhone();
             phoneEl.addEventListener('focus', function() {
                 if (!this.value || this.value.trim() === '' || this.value.trim() === '+7') {
                     this.value = Config.PHONE_PREFIX;
-                    // Курсор в конец
                     setTimeout(function() { phoneEl.setSelectionRange(phoneEl.value.length, phoneEl.value.length); }, 0);
                 }
             });
@@ -644,7 +668,7 @@
         },
 
         resetForm: function() {
-            UI.$('phone').value = Config.PHONE_PREFIX; // 🔑 сброс к префиксу
+            UI.$('phone').value = Config.PHONE_PREFIX;
             UI.$('clientName').value = '';
             UI.$('carBrand').value = '';
             UI.$('comment').value = '';
@@ -748,14 +772,10 @@
                 var extra = UI.$('recExtraComment').value.trim();
                 var newRatingVal = newRating || 'neutral';
 
-                // 🔑 Сохраняем старый _payment
-                var oldSlots = State.occupiedSlots;
-
+                // 🔑 Сервер теперь возвращает записи с _payment — mergePayment не нужен
                 Api.saveExtra(slotKey, extra, newRatingVal, data.phone || '').then(function(res) {
                     if (res && !res.error) {
-                        var newSlots = Utils.normalizeAllKeys(res);
-                        // 🔑 Мёржим _payment из старых данных
-                        State.occupiedSlots = Utils.mergePayment(newSlots, oldSlots);
+                        State.occupiedSlots = Utils.normalizeAllKeys(res);
                         App.rebuildClients();
                         App.saveToCache();
                         NewRecord.renderSlots();
@@ -1138,15 +1158,13 @@
                 .filter(function(e) { return Utils.cleanPhone(e[1].phone) === phone; })
                 .map(function(e) { return e[0]; });
 
-            var oldSlots = State.occupiedSlots;
-
+            // 🔑 Сервер возвращает с _payment — просто берём последний успешный результат
             Promise.all(keys.map(function(k) {
                 return Api.saveExtra(k, State.occupiedSlots[k].extraComment || '', target, State.occupiedSlots[k].phone || '');
             })).then(function(results) {
                 for (var i = results.length - 1; i >= 0; i--) {
                     if (results[i] && !results[i].error) {
-                        var newSlots = Utils.normalizeAllKeys(results[i]);
-                        State.occupiedSlots = Utils.mergePayment(newSlots, oldSlots);
+                        State.occupiedSlots = Utils.normalizeAllKeys(results[i]);
                         break;
                     }
                 }
@@ -1179,7 +1197,7 @@
                 if (data && !data.error) {
                     State.prices = {
                         ryabinina: data.ryabinina || null,
-                        amundsena: data.amundsena || null
+                        amundsena: data.ammundsena ? data.ammundsena : (data.amundsena || null)
                     };
                     State.pricesLoaded = true;
                     App.saveToCache();
@@ -1199,7 +1217,6 @@
             }
 
             var sizesToShow = Config.SIZES;
-            // 🔑 Только desktop-разметка. На мобильном CSS скроет .price-category и покажет .price-mobile
             var html = '';
             var mobileHtml = '';
 
@@ -1353,7 +1370,6 @@
                     payment: 'cash'
                 });
                 Tetradka.markDirty();
-                // 🔑 После добавления — перерисовка один раз (новый элемент, фокус не важен)
                 Tetradka.renderAdvances(d);
                 Tetradka.renderCash(d);
             });
@@ -1720,7 +1736,6 @@
             Tetradka.renderCash(d);
         },
 
-        // ============ ЗАПИСИ НА СЕГОДНЯ + рейтинг клиента ============
         renderRecords: function(d) {
             var html = '';
             var allRecords = d.records || [];
@@ -1740,7 +1755,6 @@
                 var cls = r.status === 'confirmed' ? 'done' : r.status === 'declined' ? 'declined' : 'pending';
                 var hasComment = r.comment || r.extraComment;
 
-                // 🔑 Рейтинг клиента
                 var phone = Utils.cleanPhone(r.phone || '');
                 var client = State.clientsDatabase[phone];
                 var ratingNum = '', ratingCls = 'neutral';
@@ -1832,7 +1846,6 @@
             });
         },
 
-        // ============ ПОДКАЧКА — без перерисовки input ============
         renderPump: function(d) {
             var html = '';
             var total = 0;
@@ -1850,7 +1863,6 @@
                     var val = Number(inp.value) || 0;
                     d.pump[inp.dataset.pump] = val;
                     Tetradka.markDirty();
-                    // 🔑 НЕ перерисовываем — только обновляем итоги
                     Tetradka.updatePumpTotal(d);
                     Tetradka.renderTotals(d);
                     Tetradka.updateCashDisplay(d);
@@ -2192,7 +2204,6 @@
             wrap.appendChild(cardsWrap);
         },
 
-        // 🔑 АВАНСЫ — без перерисовки на input, только обновление кассы
         renderAdvances: function(d) {
             var html = '';
             var total = 0;
@@ -2226,7 +2237,6 @@
                         a.amount = Number(inp.value) || 0;
                         a.payment = 'cash';
                         Tetradka.markDirty();
-                        // 🔑 НЕ перерисовываем всё — только обновляем итоги и кассу
                         Tetradka.updateAdvancesTotal(d);
                         Tetradka.updateCashDisplay(d);
                     }
@@ -2246,7 +2256,6 @@
             UI.$('advancesTotal').textContent = Utils.fmtMoney(total);
         },
 
-        // 🔑 РАСХОДЫ — без перерисовки на input
         renderExpenses: function(d) {
             var html = '';
             var total = 0;
@@ -2274,7 +2283,6 @@
                     if (e) {
                         e.amount = Number(inp.value) || 0;
                         Tetradka.markDirty();
-                        // 🔑 НЕ перерисовываем — только итоги и кассу
                         Tetradka.updateExpensesTotal(d);
                         Tetradka.updateCashDisplay(d);
                     }
@@ -2294,7 +2302,6 @@
             UI.$('expensesTotal').textContent = Utils.fmtMoney(total);
         },
 
-        // 🔑 ОБНОВЛЕНИЕ КАССЫ БЕЗ ПЕРЕРИСОВКИ ВСЕГО
         updateCashDisplay: function(d) {
             var incomeCash = d.pump.cash || 0;
             d.cars.forEach(function(c) {
@@ -2350,8 +2357,10 @@
                 Api.closeMonth({ year: State.zarpYear, month: State.zarpMonth, branch: State.zarpBranch }).then(function(res) {
                     if (res && !res.error) {
                         UI.toast('Месяц закрыт', 'success');
+                        // 🔑 Чистим оба кэша
                         State.salaryMonthData = null;
                         State.salaryMonthLoadedKey = null;
+                        SalaryCache.clearAll();
                         Zarp.loadAndRender(true);
                     }
                     else UI.toast('Ошибка', 'error');
@@ -2365,15 +2374,52 @@
             UI.$('monthLabel').textContent = Zarp.monthLabel(State.zarpYear, State.zarpMonth);
             var currentKey = State.zarpYear + '_' + State.zarpMonth;
 
+            // 🔑 Если есть в памяти — рендерим сразу
             if (!force && State.salaryMonthData && State.salaryMonthLoadedKey === currentKey) {
                 Zarp.render();
                 return;
             }
 
+            // 🔑 Если есть в sessionStorage — рендерим сразу + фоновое обновление
+            if (!force) {
+                var cached = SalaryCache.load(currentKey);
+                if (cached) {
+                    State.salaryMonthData = cached;
+                    State.salaryMonthLoadedKey = currentKey;
+                    Zarp.render();
+                    // Фоновое обновление (не блокирует UI)
+                    Zarp._backgroundRefresh(currentKey);
+                    return;
+                }
+            }
+
+            // 🔑 Первая загрузка — показываем скелетон
+            UI.$('monthSummary').innerHTML = '<div class="skeleton" style="height:80px"></div>';
+            UI.$('daysBody').innerHTML = '<tr><td colspan="10" style="text-align:center;padding:20px"><span class="spinner"></span></td></tr>';
+            UI.$('combinedBody').innerHTML = '';
+            UI.$('marksList').innerHTML = '<div class="skeleton" style="height:60px"></div>';
+
             Api.getSalaryMonth(State.zarpYear, State.zarpMonth).then(function(res) {
                 State.salaryMonthData = res || { days: [], advances: [], marks: [], masters: [] };
                 State.salaryMonthLoadedKey = currentKey;
+                SalaryCache.save(currentKey, State.salaryMonthData);
                 Zarp.render();
+            });
+        },
+
+        // 🔑 Фоновое обновление после показа кэша
+        _backgroundRefresh: function(key) {
+            Api.getSalaryMonth(State.zarpYear, State.zarpMonth).then(function(res) {
+                if (res && !res.error) {
+                    // Проверяем, что всё ещё тот же месяц
+                    if (State.salaryMonthLoadedKey === key) {
+                        State.salaryMonthData = res;
+                        SalaryCache.save(key, res);
+                        Zarp.render();
+                    } else {
+                        SalaryCache.save(key, res);
+                    }
+                }
             });
         },
 
@@ -2568,8 +2614,8 @@
             if (allItems.length === 0) html = '<div class="cash-empty">Нет пометок за месяц</div>';
             else {
                 allItems.forEach(function(item) {
-                    var typeLabel = item.type === 'adv-cassa' ? '💵 Аванс (касса)'
-                                  : item.type === 'adv' ? '💰 Аванс (вне)'
+                    var typeLabel = item.type === 'adv-cassa' ? '💵 Аванс'
+                                  : item.type === 'adv' ? '💰 Аванс'
                                   : item.type === 'warn' ? '🟡 Остаток'
                                   : item.type === 'bad' ? '🔴 Долг'
                                   : '🟢 Премия';
@@ -2577,13 +2623,13 @@
                     html += '<div class="mark-item ' + item.type + '">';
                     html += '<div class="date">' + item.date.slice(8) + '.' + item.date.slice(5, 7) + '</div>';
                     html += '<div class="branch-ico" title="' + (item.branch === 'ryabinina' ? 'Рябинина' : item.branch === 'amundsena' ? 'Амундсена' : '—') + '">' + branchIco + '</div>';
-                    html += '<div><span class="master">' + item.master + '</span>' + (item.comment ? '<span class="comment">· ' + item.comment + '</span>' : '') + '</div>';
+                    html += '<div class="master">' + item.master + '</div>';
+                    html += '<div class="comment">' + (item.comment || '') + '</div>';
                     html += '<div class="amount">' + Utils.fmtMoney(item.amount) + '</div>';
-                    html += '<div style="display:flex;gap:6px;align-items:center">';
-                    html += '<span class="type">' + typeLabel + '</span>';
+                    html += '<div class="type">' + typeLabel + '</div>';
                     if (item.readonly) html += '<button class="del disabled" disabled title="Из кассы">🔒</button>';
                     else html += '<button class="del" data-mark-del="' + item.id + '">✕</button>';
-                    html += '</div></div>';
+                    html += '</div>';
                 });
             }
             UI.$('marksList').innerHTML = html;
@@ -2592,8 +2638,10 @@
                 btn.addEventListener('click', function() {
                     Api.deleteMark(btn.dataset.markDel).then(function() {
                         UI.toast('Пометка удалена', 'success');
+                        // 🔑 Чистим кэш текущего месяца
                         State.salaryMonthData = null;
                         State.salaryMonthLoadedKey = null;
+                        SalaryCache.clear(State.zarpYear + '_' + State.zarpMonth);
                         Zarp.loadAndRender(true);
                     });
                 });
@@ -2644,8 +2692,10 @@
                     if (res && !res.error) {
                         UI.toast('Пометка добавлена', 'success');
                         Zarp.closeModal();
+                        // 🔑 Чистим кэш текущего месяца
                         State.salaryMonthData = null;
                         State.salaryMonthLoadedKey = null;
+                        SalaryCache.clear(State.zarpYear + '_' + State.zarpMonth);
                         Zarp.loadAndRender(true);
                     } else UI.toast('Ошибка', 'error');
                 });
@@ -2900,6 +2950,7 @@
 
             UI.$('mobileRefreshBtn').addEventListener('click', function() {
                 LocalCache.clear();
+                SalaryCache.clearAll();
                 State.salaryMonthData = null;
                 State.salaryMonthLoadedKey = null;
                 State.pricesLoaded = false;
