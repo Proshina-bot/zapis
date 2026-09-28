@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="theme-color" content="#0a0c10">
+<title>PRO-шина · CRM</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://script.google.com" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- МОБИЛЬНЫЙ ХЕДЕР -->
+<header class="mobile-header">
+    <button class="burger" id="burgerBtn" aria-label="Меню">☰</button>
+    <div class="title">
+        <span class="logo-mini">🛞</span>
+        <span id="mobileTitle">PRO-шина</span>
+    </div>
+    <button class="refresh-btn" id="mobileRefreshBtn" aria-label="Обновить">↻</button>
+</header>
+
+<!-- ЗАТЕМНЕНИЕ -->
+<div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
+<!-- ТОСТЫ -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- ПРИЛОЖЕНИЕ -->
+<div class="app">
+
+    <!-- САЙДБАР -->
+    <aside class="sidebar" id="sidebar">
+        <div class="logo">
+            <div class="logo-inner">
+                <div class="logo-icon">🛞</div>
+                <div class="logo-text">
+                    <h1>PRO-шина</h1>
+                    <small>CRM Admin</small>
+                </div>
+            </div>
+        </div>
+
+        <div class="nav-group">
+            <div class="nav-group-title">Работа</div>
+            <button class="nav-item active" data-page="newRecord">
+                <span class="icon">✦</span> Новая запись
+            </button>
+            <button class="nav-item" data-page="price">
+                <span class="icon">₽</span> Прайс-лист
+            </button>
+            <button class="nav-item" data-page="tetradka">
+                <span class="icon">📓</span> Тетрадка
+            </button>
+            <button class="nav-item" data-page="zarplaty">
+                <span class="icon">💰</span> Зарплаты
+            </button>
+        </div>
+
+        <div class="nav-group">
+            <div class="nav-group-title">Клиенты</div>
+            <button class="nav-item" data-page="clients">
+                <span class="icon">◉</span> База клиентов
+                <span class="badge" id="clientsBadge">0</span>
+            </button>
+            <button class="nav-item" data-page="journal">
+                <span class="icon">▤</span> Журнал
+            </button>
+        </div>
+    </aside>
+
+    <!-- ОСНОВНАЯ ОБЛАСТЬ -->
+    <main class="main">
+
+        <!-- ==================== НОВАЯ ЗАПИСЬ ==================== -->
+        <div class="page active" id="page-newRecord">
+            <div class="page-header">
+                <div class="page-header-left">
+                    <div class="page-header-title">
+                        <h2>Новая запись</h2>
+                        <div class="subtitle">Выберите слот и данные клиента</div>
+                    </div>
+                    <div class="branch-selector-lg" id="newRecordBranchSelector">
+                        <button class="branch-btn-lg active" data-branch="ryabinina">🏠 Рябинина</button>
+                        <button class="branch-btn-lg" data-branch="amundsena">🏭 Амундсена</button>
+                    </div>
+                </div>
+                <div class="date-picker-center">
+                    <span>📅</span>
+                    <input type="text" id="datePicker" class="date-input-center" placeholder="Дата" readonly>
+                </div>
+                <div class="page-header-right">
+                    <div class="load-indicator" id="loadIndicator">
+                        <span class="load-dot"></span>
+                        <span id="loadText">—</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stats-panel">
+                <div class="stat-card">
+                    <div class="stat-label">Свободно</div>
+                    <div class="stat-value accent" id="statFreeSlots">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Записей на дату</div>
+                    <div class="stat-value" id="statBooked">—</div>
+                </div>
+            </div>
+
+            <div class="work-grid">
+                <div class="card">
+                    <div class="card-title">
+                        <span>Доступное время</span>
+                        <span class="badge" id="freeCounter">0 свободно</span>
+                    </div>
+                    <div class="time-slots" id="slotsContainer"></div>
+                </div>
+
+                <div class="card">
+                    <div class="card-title">Данные клиента</div>
+
+                    <div class="slot-info-banner" id="slotInfoBanner"></div>
+
+                    <div class="form-group">
+                        <label>Телефон клиента</label>
+                        <input type="tel" id="phone" class="form-control" placeholder="+7 (___) ___-__-__" autocomplete="off" inputmode="tel">
+                        <div class="autocomplete-hint" id="autocompleteHint"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Имя клиента</label>
+                        <input type="text" id="clientName" class="form-control" placeholder="Иван Иванов" autocomplete="name">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Марка авто</label>
+                        <input type="text" id="carBrand" class="form-control" placeholder="TOYOTA CAMRY" style="text-transform:uppercase">
+                        <div id="carsChips" class="cars-chips" style="display:none"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Репутация клиента</label>
+                        <div class="rating-block">
+                            <button class="rating-btn good" id="ratingGood">👍</button>
+                            <button class="rating-btn bad" id="ratingBad">👎 Проблемный</button>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Услуги</label>
+                        <div class="services-grid" id="servicesGrid"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Размер колёс</label>
+                        <div class="sizes-grid" id="sizesGrid"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Способ уведомления</label>
+                        <div class="notify-grid">
+                            <button class="notify-btn whatsapp active" data-notify="whatsapp">💬 WhatsApp</button>
+                            <button class="notify-btn sms" data-notify="sms">📱 SMS</button>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Комментарий</label>
+                        <textarea id="comment" class="form-control" placeholder="Особые пожелания..."></textarea>
+                    </div>
+
+                    <button class="submit-btn" id="submitBtn" disabled>
+                        <span id="submitText">✚ Записать клиента</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== ПРАЙС-ЛИСТ ==================== -->
+        <div class="page" id="page-price">
+            <div class="page-header">
+                <div class="page-header-left">
+                    <div class="page-header-title">
+                        <h2>Прайс-лист</h2>
+                        <div class="subtitle">Данные из Google Sheets</div>
+                    </div>
+                    <div class="branch-selector-lg">
+                        <button class="branch-btn-lg price-branch active" data-branch="ryabinina">🏠 Рябинина</button>
+                        <button class="branch-btn-lg price-branch" data-branch="amundsena">🏭 Амундсена</button>
+                    </div>
+                </div>
+                <div class="page-header-right">
+                    <button class="btn" id="reloadPricesBtn">↻ Обновить</button>
+                </div>
+            </div>
+            <div id="priceContent"></div>
+        </div>
+
+        <!-- ==================== ТЕТРАДКА ==================== -->
+        <div class="page" id="page-tetradka">
+            <div class="page-header">
+                <div class="page-header-left">
+                    <div class="page-header-title">
+                        <h2>📓 Тетрадка</h2>
+                        <div class="subtitle">Ежедневный учёт выручки и зарплат</div>
+                    </div>
+                    <div class="branch-selector-lg">
+                        <button class="branch-btn-lg tetradka-branch active" data-branch="ryabinina">🏠 Рябинина</button>
+                        <button class="branch-btn-lg tetradka-branch" data-branch="amundsena">🏭 Амундсена</button>
+                    </div>
+                </div>
+                <div class="page-header-actions">
+                    <div class="date-picker-center">
+                        <span>📅</span>
+                        <input type="text" id="tetradkaDatePicker" class="date-input-center" placeholder="Дата" readonly>
+                    </div>
+                    <div class="save-status" id="saveStatus">
+                        <span class="save-status-dot" id="saveStatusDot"></span>
+                        <span id="saveStatusText">—</span>
+                    </div>
+                    <button class="btn warning" id="saveTetradkaBtn">🔒 Закрыть смену</button>
+                </div>
+            </div>
+
+            <div class="top-split">
+                <div class="card">
+                    <div class="card-title">
+                        <span>📌 Записи на сегодня</span>
+                        <span class="badge accent" id="recordsCount">0 из 0</span>
+                    </div>
+                    <div class="records-compact" id="recordsList"></div>
+                </div>
+
+                <div class="card">
+                    <div class="card-title">
+                        <span>💨 Подкачка</span>
+                        <span class="badge success" id="pumpTotal">0 ₽</span>
+                    </div>
+                    <div class="pump-table" id="pumpTable"></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">
+                    <span>👥 Мастера на смене</span>
+                    <span class="badge" id="mastersCount">0 выбрано</span>
+                </div>
+                <div class="masters-row" id="mastersRow"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">
+                    <span>📋 Услуги и проценты (% от суммы услуги)</span>
+                    <button class="btn xs" id="addServiceBtn">+ Услуга</button>
+                </div>
+                <div class="services-table-wrap">
+                    <table class="services-table" id="servicesTable">
+                        <thead id="servicesHead"></thead>
+                        <tbody id="servicesBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">
+                    <span>🚗 Машины за день</span>
+                    <span class="badge" id="carsCount">0 машин</span>
+                </div>
+                <div class="cars-list" id="carsList"></div>
+                <button class="add-car-btn" id="addCarBtn">
+                    <span>+</span> Добавить машину
+                </button>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span>💵 Итоги по способам оплаты</span></div>
+                <div class="totals-grid" id="paymentsTotals"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span>💰 Зарплата мастеров</span></div>
+                <div class="tbl-wrap">
+                    <table class="tbl" id="salaryTable">
+                        <thead id="salaryHead"></thead>
+                        <tbody id="salaryBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span>🏦 Касса</span></div>
+                <div class="cash-block">
+
+                    <div class="cash-row-top">
+                        <div class="cash-cell">
+                            <div class="label">Начало дня</div>
+                            <input type="number" id="cashStart" value="0" min="0" step="100">
+                            <div class="hint">Авто с прошлого дня</div>
+                        </div>
+                        <div class="cash-cell">
+                            <div class="label">Поступления (нал)</div>
+                            <div class="static" id="cashIncome">0 ₽</div>
+                            <div class="hint">Автоматически</div>
+                        </div>
+                        <div class="cash-cell">
+                            <div class="label">Авансы</div>
+                            <div class="static" id="cashAdvances">0 ₽</div>
+                            <div class="hint">Сумма выданного</div>
+                        </div>
+                        <div class="cash-cell">
+                            <div class="label">Расходы</div>
+                            <div class="static" id="cashExpenses">0 ₽</div>
+                            <div class="hint">Сумма расходов</div>
+                        </div>
+                        <div class="cash-cell total">
+                            <div class="label">Итого в кассе</div>
+                            <div class="static" id="cashTotal">0 ₽</div>
+                            <div class="hint">Начало + Нал − Авансы − Расходы</div>
+                        </div>
+                    </div>
+
+                    <div class="cash-subblock">
+                        <div class="cash-subblock-head">
+                            <div class="cash-subblock-title">💸 Авансы мастерам</div>
+                            <div class="cash-subblock-total" id="advancesTotal">0 ₽</div>
+                        </div>
+                        <div class="cash-list" id="advancesList"></div>
+                        <button class="cash-add-btn" id="addAdvanceBtn">+ Добавить аванс</button>
+                    </div>
+
+                    <div class="cash-subblock">
+                        <div class="cash-subblock-head">
+                            <div class="cash-subblock-title">📝 Расходы</div>
+                            <div class="cash-subblock-total" id="expensesTotal">0 ₽</div>
+                        </div>
+                        <div class="cash-list" id="expensesList"></div>
+                        <button class="cash-add-btn" id="addExpenseBtn">+ Добавить расход</button>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== ЗАРПЛАТЫ ==================== -->
+        <div class="page" id="page-zarplaty">
+            <div class="page-header">
+                <div class="page-header-left">
+                    <div class="page-header-title">
+                        <h2>💰 Зарплаты</h2>
+                        <div class="subtitle">Сводка по мастерам за месяц</div>
+                    </div>
+                    <div class="branch-selector-lg">
+                        <button class="branch-btn-lg zarp-branch active" data-branch="ryabinina">🏠 Рябинина</button>
+                        <button class="branch-btn-lg zarp-branch" data-branch="amundsena">🏭 Амундсена</button>
+                    </div>
+                    <div class="month-selector">
+                        <button id="prevMonth">‹</button>
+                        <div class="current" id="monthLabel">—</div>
+                        <button id="nextMonth">›</button>
+                    </div>
+                </div>
+                <div class="page-header-actions">
+                    <button class="btn warning" id="closeMonthBtn">🔒 Закрыть месяц</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">
+                    <span>📊 Итоги за месяц (текущий филиал)</span>
+                    <span class="badge" id="daysCount">0 дней</span>
+                </div>
+                <div class="summary-grid" id="monthSummary"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">
+                    <span>📅 Сводка по дням месяца</span>
+                    <span class="badge accent">слева — выручка, справа — зарплата мастеров</span>
+                </div>
+                <div class="tbl-wrap">
+                    <table class="tbl" id="daysTable">
+                        <thead id="daysHead"></thead>
+                        <tbody id="daysBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">
+                    <span>💰 Итоги по двум филиалам</span>
+                    <span class="badge accent">Рябина + Амундсена</span>
+                </div>
+                <div class="tbl-wrap">
+                    <table class="tbl" id="combinedTable">
+                        <thead>
+                            <tr>
+                                <th>Мастер</th>
+                                <th>Зарплата</th>
+                                <th>Авансы</th>
+                                <th>Остаток</th>
+                                <th>Долг / Премия</th>
+                            </tr>
+                        </thead>
+                        <tbody id="combinedBody"></tbody>
+                    </table>
+                </div>
+                <div class="legend">
+                    <div class="legend-item"><span class="legend-dot warn"></span>Остаток с прошлого месяца</div>
+                    <div class="legend-item"><span class="legend-dot bad"></span>Долг (отрицательный остаток)</div>
+                    <div class="legend-item"><span class="legend-dot good"></span>Премия / другие</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">
+                    <span>📝 Пометки за месяц</span>
+                    <button class="btn xs primary" id="addMarkBtn">+ Добавить пометку</button>
+                </div>
+                <div class="marks-list" id="marksList"></div>
+            </div>
+        </div>
+
+        <!-- ==================== БАЗА КЛИЕНТОВ ==================== -->
+        <div class="page" id="page-clients">
+            <div class="page-header">
+                <div class="page-header-title">
+                    <h2>База клиентов</h2>
+                    <div class="subtitle">Постоянные клиенты и их история</div>
+                </div>
+                <div class="badge accent" id="clientsCounter" style="padding:6px 14px;font-size:12px">0 клиентов</div>
+            </div>
+            <div class="clients-toolbar">
+                <input type="text" id="clientSearch" class="search-input" placeholder="🔍 Поиск по имени, телефону или марке...">
+            </div>
+            <div id="clientsList"></div>
+        </div>
+
+        <!-- ==================== ЖУРНАЛ ==================== -->
+        <div class="page" id="page-journal">
+            <div class="page-header">
+                <div class="page-header-title">
+                    <h2>Журнал записей</h2>
+                    <div class="subtitle">Все записи клиентов</div>
+                </div>
+                <div class="badge accent" id="journalCounter" style="padding:6px 14px;font-size:12px">0 записей</div>
+            </div>
+            <div class="clients-toolbar">
+                <input type="text" id="journalSearch" class="search-input" placeholder="🔍 Поиск по имени, телефону, марке, услуге, дате...">
+            </div>
+            <div class="journal-list" id="journalList"></div>
+        </div>
+
+    </main>
+</div>
+
+<!-- ==================== МОДАЛКИ ==================== -->
+<div class="modal-overlay" id="clientModal">
+    <div class="modal-content" id="clientModalContent"></div>
+</div>
+
+<div class="modal-overlay" id="recordModal">
+    <div class="modal-content" id="recordModalContent"></div>
+</div>
+
+<div class="modal-overlay" id="moveModal">
+    <div class="modal-content" id="moveModalContent"></div>
+</div>
+
+<div class="modal-overlay" id="markModal">
+    <div class="modal-content" id="markModalContent"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ru.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
