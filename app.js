@@ -1913,18 +1913,23 @@
                 .map(function(s) { return s.name; });
             var paymentCodes = Payments.all();
 
-            var total = d.cars.length;
-            var limit = State.carsLimit || 10;
-            var visibleCars = d.cars.slice(0, limit);
+var total = d.cars.length;
+var limit = State.carsLimit || 10;
+// 🆕 Показываем ПОСЛЕДНИЕ `limit` машин, скрывая первые
+var startIdx = Math.max(0, total - limit);
+var visibleCars = d.cars.slice(startIdx);
+// Индекс для нумерации — с учётом скрытых
+var offset = startIdx;
 
-            visibleCars.forEach(function(c, idx) {
+visibleCars.forEach(function(c, idx) {
+    var globalIdx = offset + idx;
                 var linked = c.recordKey ? 'linked' : '';
                 var carTotal = c.services.reduce(function(s, x) { return s + (Number(x.amount) || 0); }, 0);
                 var hasRecord = !!c.recordKey;
 
                 html += '<div class="car-row ' + linked + '">';
                 html += '<div class="car-row-head">';
-                html += '<div class="num">#' + (idx + 1) + (hasRecord ? ' 🔗' : '') + '</div>';
+                html += '<div class="num">#' + (globalIdx + 1) + (hasRecord ? ' 🔗' : '') + '</div>';
                 html += '<input class="car-name" type="text" value="' + c.car + '" data-car="' + c.id + '" placeholder="МАРКА">';
                 html += '<div class="total">' + Utils.fmtMoney(carTotal) + '</div>';
                 if (hasRecord) {
@@ -2112,30 +2117,29 @@
             var masterTotals = {};
             activeMasters.forEach(function(m) { masterTotals[m.name] = 0; });
 
-            d.services.forEach(function(svc) {
-                if (!svc || !svc.name) return;
-                var sum = serviceSums[svc.name] || 0;
-                bodyHtml += '<tr><td>' + svc.name + ' <span style="color:var(--text-2);font-weight:500;font-size:11px">· ' + Utils.fmtMoney(sum) + '</span></td>';
-                activeMasters.forEach(function(m) {
-                    var pct = svc.percents[m.name];
-                    if (pct === undefined) bodyHtml += '<td class="dim">—</td>';
-                    else {
-                        var salary = sum * (pct / 100);
-                        masterTotals[m.name] += salary;
-                        bodyHtml += '<td class="success">' + Utils.fmtMoney(Math.round(salary)) + '</td>';
-                    }
-                });
-                bodyHtml += '</tr>';
-            });
-            if (activeMasters.length > 0) {
-                bodyHtml += '<tr class="row-total"><td>ИТОГО</td>';
-                activeMasters.forEach(function(m) { bodyHtml += '<td>' + Utils.fmtMoney(Math.round(masterTotals[m.name])) + '</td>'; });
-                bodyHtml += '</tr>';
-            } else {
-                bodyHtml = '<tr><td colspan="2" style="text-align:center;color:var(--text-3);padding:30px">Отметьте мастеров</td></tr>';
-            }
-            UI.$('salaryBody').innerHTML = bodyHtml;
-        },
+d.services.forEach(function(svc) {
+    if (!svc || !svc.name) return;
+    var sum = serviceSums[svc.name] || 0;
+    bodyHtml += '<tr><td>' + svc.name + ' <span style="color:var(--text-2);font-weight:500;font-size:11px">· ' + Utils.fmtMoney(sum) + '</span></td>';
+    activeMasters.forEach(function(m) {
+        var pct = svc.percents[m.name];
+        if (pct === undefined) {
+            bodyHtml += '<td class="dim" data-master="' + m.name + '">—</td>';
+        } else {
+            var salary = sum * (pct / 100);
+            masterTotals[m.name] += salary;
+            bodyHtml += '<td class="success" data-master="' + m.name + '">' + Utils.fmtMoney(Math.round(salary)) + '</td>';
+        }
+    });
+    bodyHtml += '</tr>';
+});
+if (activeMasters.length > 0) {
+    bodyHtml += '<tr class="row-total"><td>ИТОГО</td>';
+    activeMasters.forEach(function(m) {
+        bodyHtml += '<td data-master="' + m.name + '">' + Utils.fmtMoney(Math.round(masterTotals[m.name])) + '</td>';
+    });
+    bodyHtml += '</tr>';
+}
 
         // ============ АВАНСЫ (только наличные) ============
         renderAdvances: function(d) {
@@ -2466,64 +2470,81 @@
             UI.$('combinedBody').innerHTML = html;
         },
 
-        renderMarks: function(data) {
-            var branch = State.zarpBranch;
-            var allItems = [];
+renderMarks: function(data) {
+    // 🆕 Пометки — ЕДИНЫЕ для двух филиалов (без фильтра по branch)
+    var allItems = [];
 
-            (data.advances || []).forEach(function(a) {
-                if (a.branch !== branch) return;
-                allItems.push({
-                    id: 'cassa_' + a.id, type: 'adv-cassa',
-                    master: a.master, amount: a.amount,
-                    comment: a.comment || '', date: a.date, readonly: true
-                });
+    // Авансы из кассы (из Тетрадки) — оба филиала
+    (data.advances || []).forEach(function(a) {
+        allItems.push({
+            id: 'cassa_' + a.id,
+            type: 'adv-cassa',
+            master: a.master,
+            amount: a.amount,
+            comment: a.comment || '',
+            date: a.date,
+            branch: a.branch || '',
+            readonly: true
+        });
+    });
+
+    // Пометки (остаток / долг / премия / аванс вне кассы) — оба филиала
+    (data.marks || []).forEach(function(m) {
+        allItems.push({
+            id: m.id,
+            type: m.type,
+            master: m.master,
+            amount: m.amount,
+            comment: m.comment || '',
+            date: m.date,
+            branch: m.branch || '',
+            readonly: false
+        });
+    });
+
+    allItems.sort(function(a, b) { return a.date < b.date ? 1 : -1; });
+
+    var html = '';
+    if (allItems.length === 0) {
+        html = '<div class="cash-empty">Нет пометок за месяц</div>';
+    } else {
+        allItems.forEach(function(item) {
+            var typeLabel = item.type === 'adv-cassa' ? '💵 Аванс (касса)'
+                          : item.type === 'adv' ? '💰 Аванс (вне)'
+                          : item.type === 'warn' ? '🟡 Остаток'
+                          : item.type === 'bad' ? '🔴 Долг'
+                          : '🟢 Премия';
+            var branchTag = item.branch === 'ryabinina' ? '🏠'
+                          : item.branch === 'amundsena' ? '🏭'
+                          : '';
+
+            html += '<div class="mark-item ' + item.type + '">';
+            html += '<div class="date">' + item.date.slice(8) + '.' + item.date.slice(5, 7) + '</div>';
+            html += '<div><span class="master">' + item.master + '</span>' +
+                    (branchTag ? ' <span style="opacity:0.6;font-size:10px">' + branchTag + '</span>' : '') +
+                    (item.comment ? '<span class="comment">· ' + item.comment + '</span>' : '') +
+                    '</div>';
+            html += '<div class="amount">' + Utils.fmtMoney(item.amount) + '</div>';
+            html += '<div style="display:flex;gap:6px;align-items:center">';
+            html += '<span class="type">' + typeLabel + '</span>';
+            if (item.readonly) html += '<button class="del disabled" disabled title="Из кассы">🔒</button>';
+            else html += '<button class="del" data-mark-del="' + item.id + '">✕</button>';
+            html += '</div></div>';
+        });
+    }
+    UI.$('marksList').innerHTML = html;
+
+    document.querySelectorAll('[data-mark-del]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            Api.deleteMark(btn.dataset.markDel).then(function() {
+                UI.toast('Пометка удалена', 'success');
+                State.salaryMonthData = null;
+                State.salaryMonthLoadedKey = null;
+                Zarp.loadAndRender(true);
             });
-
-            (data.marks || []).forEach(function(m) {
-                if (m.branch !== branch) return;
-                allItems.push({
-                    id: m.id, type: m.type,
-                    master: m.master, amount: m.amount,
-                    comment: m.comment || '', date: m.date, readonly: false
-                });
-            });
-
-            allItems.sort(function(a, b) { return a.date < b.date ? 1 : -1; });
-
-            var html = '';
-            if (allItems.length === 0) html = '<div class="cash-empty">Нет пометок за месяц</div>';
-            else {
-                allItems.forEach(function(item) {
-                    var typeLabel = item.type === 'adv-cassa' ? '💵 Аванс (касса)'
-                                  : item.type === 'adv' ? '💰 Аванс (вне)'
-                                  : item.type === 'warn' ? '🟡 Остаток'
-                                  : item.type === 'bad' ? '🔴 Долг'
-                                  : '🟢 Премия';
-                    html += '<div class="mark-item ' + item.type + '">';
-                    html += '<div class="date">' + item.date.slice(8) + '.' + item.date.slice(5, 7) + '</div>';
-                    html += '<div><span class="master">' + item.master + '</span>' + (item.comment ? '<span class="comment">· ' + item.comment + '</span>' : '') + '</div>';
-                    html += '<div class="amount">' + Utils.fmtMoney(item.amount) + '</div>';
-                    html += '<div style="display:flex;gap:6px;align-items:center">';
-                    html += '<span class="type">' + typeLabel + '</span>';
-                    if (item.readonly) html += '<button class="del disabled" disabled title="Из кассы">🔒</button>';
-                    else html += '<button class="del" data-mark-del="' + item.id + '">✕</button>';
-                    html += '</div></div>';
-                });
-            }
-            UI.$('marksList').innerHTML = html;
-
-            document.querySelectorAll('[data-mark-del]').forEach(function(btn) {
-                btn.addEventListener('click', function() {
-                    Api.deleteMark(btn.dataset.markDel).then(function() {
-                        UI.toast('Пометка удалена', 'success');
-                        State.salaryMonthData = null;
-                        State.salaryMonthLoadedKey = null;
-                        Zarp.loadAndRender(true);
-                    });
-                });
-            });
-        },
-
+        });
+    });
+},
         openMarkModal: function() {
             var content = UI.$('markModalContent');
             content.className = 'modal-content';
