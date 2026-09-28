@@ -1,7 +1,12 @@
 /* ============================================================
- * PRO-шина · CRM — app.js v2.4
+ * PRO-шина · CRM — app.js v2.5
  * Локальный кэш только для подтверждённых сервером данных
  * Ленивая загрузка Тетрадки и Зарплат
+ * Правки:
+ *  - Репутация клиента (компактно)
+ *  - Зарплаты мастеров в Тетрадке — карточки на мобильном
+ *  - Пометки за месяц — единые для двух филиалов, с иконкой
+ *  - Машины: input «Скрыть N машин» + кнопка «Показать все»
  * ============================================================ */
 
 (function() {
@@ -14,7 +19,7 @@
         APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbx9pV5or2NUd1rIzUylc0G7N4OmEfyZcK67D_jp0l2dzsruQaH4fQIz3_Roo-fvjjeR/exec', // ← ЗАМЕНИТЕ
         CARS: ['1', '2', '3'],
         SIZES: ['R13','R14','R15','R16','R17','R18','R19','R20','R21','R22','R23'],
-        REFRESH_INTERVAL: 60000,       // фон-обновление 60 сек
+        REFRESH_INTERVAL: 60000,
         CACHE_TTL: 60000,
         FETCH_TIMEOUT: 20000,
         MAX_RETRIES: 2,
@@ -59,11 +64,9 @@
     // 🗄 STATE
     // ================================================================
     var State = {
-        // CRM
         occupiedSlots: {},
         clientsDatabase: {},
 
-        // Новая запись
         currentBranch: 'ryabinina',
         currentSelection: { date: null, time: null, car: null, slotKey: null },
         selectedServices: [],
@@ -71,28 +74,25 @@
         clientRating: null,
         notificationMethod: 'whatsapp',
 
-        // Прайс
         priceBranch: 'ryabinina',
         prices: { ryabinina: null, amundsena: null },
         pricesLoaded: false,
 
-        // Тетрадка
         tetradkaBranch: 'ryabinina',
         tetradkaDate: null,
         mastersList: [],
         tetradka: { ryabinina: null, amundsena: null },
         tetradkaLoaded: { ryabinina: false, amundsena: false },
         hideProcessedRecords: false,
-        carsLimit: 10,
+        // 🔑 новое: сколько машин скрыть (сверху списка)
+        carsHideCount: 0,
 
-        // Зарплаты
         zarpBranch: 'ryabinina',
         zarpYear: new Date().getFullYear(),
         zarpMonth: new Date().getMonth(),
         salaryMonthData: null,
         salaryMonthLoadedKey: null,
 
-        // Служебные
         isUpdating: false,
         lastBootstrapAt: 0,
         bootstrapInFlight: null
@@ -413,7 +413,6 @@
 
             UI.$('submitBtn').addEventListener('click', NewRecord.submit);
 
-            // 🔑 Инициализация услуг сразу
             NewRecord.renderServicesGrid();
         },
 
@@ -911,7 +910,7 @@
     };
 
     // ================================================================
-    // 📓 JOURNAL — с оплатой из Тетрадки
+    // 📓 JOURNAL
     // ================================================================
     var Journal = {
         render: function() {
@@ -1255,11 +1254,13 @@
                         Tetradka.autoSave().then(function() {
                             State.tetradkaDate = ds;
                             State.tetradkaLoaded[State.tetradkaBranch] = false;
+                            State.carsHideCount = 0;
                             Tetradka.loadDay();
                         });
                     } else {
                         State.tetradkaDate = ds;
                         State.tetradkaLoaded[State.tetradkaBranch] = false;
+                        State.carsHideCount = 0;
                         Tetradka.loadDay();
                     }
                 }
@@ -1271,6 +1272,7 @@
                         document.querySelectorAll('.tetradka-branch').forEach(function(b) { b.classList.remove('active'); });
                         btn.classList.add('active');
                         State.tetradkaBranch = btn.dataset.branch;
+                        State.carsHideCount = 0;
                         Tetradka.loadDay();
                     };
                     if (Tetradka._hasChanges) Tetradka.autoSave().then(doSwitch);
@@ -1278,7 +1280,6 @@
                 });
             });
 
-            // Скрыть обработанные
             UI.$('toggleProcessedRecords').addEventListener('click', function() {
                 State.hideProcessedRecords = !State.hideProcessedRecords;
                 this.textContent = State.hideProcessedRecords ? '👁 Показать обработанные' : '👁 Скрыть обработанные';
@@ -1287,23 +1288,25 @@
                 if (d) Tetradka.renderRecords(d);
             });
 
-            // Показать ещё 10 машин
-            UI.$('showMoreCarsBtn').addEventListener('click', function() {
-                State.carsLimit += 10;
-                var d = Tetradka.getCurrent();
-                if (d) Tetradka.renderCars(d);
-            });
-
-            // Показать все / Свернуть
-            UI.$('toggleCarsLimit').addEventListener('click', function() {
+            // 🔑 НОВОЕ: скрыть N машин
+            UI.$('applyHideCarsBtn').addEventListener('click', function() {
+                var input = UI.$('carsHideInput');
+                var val = parseInt(input.value, 10);
+                if (isNaN(val) || val < 0) val = 0;
                 var d = Tetradka.getCurrent();
                 if (!d) return;
-                if (State.carsLimit >= d.cars.length) {
-                    State.carsLimit = 10;
-                } else {
-                    State.carsLimit = d.cars.length;
-                }
+                var max = d.cars.length;
+                if (val > max) val = max;
+                State.carsHideCount = val;
                 Tetradka.renderCars(d);
+            });
+
+            // 🔑 НОВОЕ: показать все
+            UI.$('showAllCarsBtn').addEventListener('click', function() {
+                State.carsHideCount = 0;
+                UI.$('carsHideInput').value = 0;
+                var d = Tetradka.getCurrent();
+                if (d) Tetradka.renderCars(d);
             });
 
             UI.$('addServiceBtn').addEventListener('click', function() {
@@ -1704,7 +1707,6 @@
             Tetradka.renderCash(d);
         },
 
-        // ============ ЗАПИСИ НА СЕГОДНЯ ============
         renderRecords: function(d) {
             var html = '';
             var allRecords = d.records || [];
@@ -1800,7 +1802,6 @@
             });
         },
 
-        // ============ ПОДКАЧКА ============
         renderPump: function(d) {
             var html = '';
             var total = 0;
@@ -1824,7 +1825,6 @@
             });
         },
 
-        // ============ МАСТЕРА ============
         renderMasters: function(d) {
             var html = '';
             d.masters.forEach(function(m) {
@@ -1850,7 +1850,6 @@
             });
         },
 
-        // ============ УСЛУГИ И % ============
         renderServices: function(d) {
             var activeMasters = d.masters.filter(function(m) { return d.mastersOnShift[m.name]; });
             var headHtml = '<tr><th>Услуга</th>';
@@ -1905,7 +1904,7 @@
             });
         },
 
-        // ============ МАШИНЫ ============
+        // ============ МАШИНЫ — СКРЫТИЕ ПЕРВЫХ N ============
         renderCars: function(d) {
             var html = '';
             var svcOptions = d.services
@@ -1913,23 +1912,27 @@
                 .map(function(s) { return s.name; });
             var paymentCodes = Payments.all();
 
-var total = d.cars.length;
-var limit = State.carsLimit || 10;
-// 🆕 Показываем ПОСЛЕДНИЕ `limit` машин, скрывая первые
-var startIdx = Math.max(0, total - limit);
-var visibleCars = d.cars.slice(startIdx);
-// Индекс для нумерации — с учётом скрытых
-var offset = startIdx;
+            var total = d.cars.length;
+            // 🔑 Скрываем первые State.carsHideCount машин
+            var hideCount = Math.min(State.carsHideCount || 0, total);
+            var visibleCars = d.cars.slice(hideCount);
 
-visibleCars.forEach(function(c, idx) {
-    var globalIdx = offset + idx;
+            UI.$('carsCount').textContent = total + ' ' + (total === 1 ? 'машина' : 'машин') +
+                (hideCount > 0 ? ' (скрыто ' + hideCount + ')' : '');
+
+            // Обновляем input
+            var input = UI.$('carsHideInput');
+            if (input && Number(input.value) !== hideCount) input.value = hideCount;
+
+            visibleCars.forEach(function(c, idx) {
+                var originalIdx = hideCount + idx; // индекс в общем массиве
                 var linked = c.recordKey ? 'linked' : '';
                 var carTotal = c.services.reduce(function(s, x) { return s + (Number(x.amount) || 0); }, 0);
                 var hasRecord = !!c.recordKey;
 
                 html += '<div class="car-row ' + linked + '">';
                 html += '<div class="car-row-head">';
-                html += '<div class="num">#' + (globalIdx + 1) + (hasRecord ? ' 🔗' : '') + '</div>';
+                html += '<div class="num">#' + (originalIdx + 1) + (hasRecord ? ' 🔗' : '') + '</div>';
                 html += '<input class="car-name" type="text" value="' + c.car + '" data-car="' + c.id + '" placeholder="МАРКА">';
                 html += '<div class="total">' + Utils.fmtMoney(carTotal) + '</div>';
                 if (hasRecord) {
@@ -1970,27 +1973,7 @@ visibleCars.forEach(function(c, idx) {
             });
 
             UI.$('carsList').innerHTML = html || '<div class="cash-empty">Нет машин</div>';
-            UI.$('carsCount').textContent = total + ' ' + (total === 1 ? 'машина' : 'машин');
 
-            // Кнопки Показать все / Показать ещё
-            var showMoreBtn = UI.$('showMoreCarsBtn');
-            var toggleBtn = UI.$('toggleCarsLimit');
-
-            if (total > 10) {
-                toggleBtn.style.display = 'inline-flex';
-                toggleBtn.textContent = limit >= total ? 'Свернуть' : 'Показать все';
-            } else {
-                toggleBtn.style.display = 'none';
-            }
-
-            if (limit < total) {
-                showMoreBtn.style.display = 'flex';
-                showMoreBtn.textContent = 'Показать ещё ' + Math.min(10, total - limit) + ' машин';
-            } else {
-                showMoreBtn.style.display = 'none';
-            }
-
-            // Обработчики
             document.querySelectorAll('[data-car]').forEach(function(inp) {
                 inp.addEventListener('change', function() {
                     var car = d.cars.find(function(c) { return c.id === inp.dataset.car; });
@@ -2063,7 +2046,6 @@ visibleCars.forEach(function(c, idx) {
             });
         },
 
-        // ============ ИТОГИ ============
         renderTotals: function(d) {
             var totals = {};
             var grandTotal = 0;
@@ -2088,7 +2070,7 @@ visibleCars.forEach(function(c, idx) {
             UI.$('paymentsTotals').innerHTML = html;
         },
 
-        // ============ ЗАРПЛАТА МАСТЕРОВ ============
+        // ============ ЗАРПЛАТА МАСТЕРОВ — ТАБЛИЦА + КАРТОЧКИ МОБИЛЬНЫЕ ============
         renderSalary: function(d) {
             var activeMasters = d.masters.filter(function(m) { return d.mastersOnShift[m.name]; });
             var serviceSums = {};
@@ -2108,6 +2090,7 @@ visibleCars.forEach(function(c, idx) {
                 serviceSums['подкачка'] += pumpTotal;
             }
 
+            // --- Таблица (десктоп) ---
             var headHtml = '<tr><th>Услуга</th>';
             activeMasters.forEach(function(m) { headHtml += '<th>' + m.name + '</th>'; });
             headHtml += '</tr>';
@@ -2117,31 +2100,65 @@ visibleCars.forEach(function(c, idx) {
             var masterTotals = {};
             activeMasters.forEach(function(m) { masterTotals[m.name] = 0; });
 
-d.services.forEach(function(svc) {
-    if (!svc || !svc.name) return;
-    var sum = serviceSums[svc.name] || 0;
-    bodyHtml += '<tr><td>' + svc.name + ' <span style="color:var(--text-2);font-weight:500;font-size:11px">· ' + Utils.fmtMoney(sum) + '</span></td>';
-    activeMasters.forEach(function(m) {
-        var pct = svc.percents[m.name];
-        if (pct === undefined) {
-            bodyHtml += '<td class="dim" data-master="' + m.name + '">—</td>';
-        } else {
-            var salary = sum * (pct / 100);
-            masterTotals[m.name] += salary;
-            bodyHtml += '<td class="success" data-master="' + m.name + '">' + Utils.fmtMoney(Math.round(salary)) + '</td>';
-        }
-    });
-    bodyHtml += '</tr>';
-});
-if (activeMasters.length > 0) {
-    bodyHtml += '<tr class="row-total"><td>ИТОГО</td>';
-    activeMasters.forEach(function(m) {
-        bodyHtml += '<td data-master="' + m.name + '">' + Utils.fmtMoney(Math.round(masterTotals[m.name])) + '</td>';
-    });
-    bodyHtml += '</tr>';
-}
+            d.services.forEach(function(svc) {
+                if (!svc || !svc.name) return;
+                var sum = serviceSums[svc.name] || 0;
+                bodyHtml += '<tr><td>' + svc.name + ' <span style="color:var(--text-2);font-weight:500;font-size:11px">· ' + Utils.fmtMoney(sum) + '</span></td>';
+                activeMasters.forEach(function(m) {
+                    var pct = svc.percents[m.name];
+                    if (pct === undefined) bodyHtml += '<td class="dim">—</td>';
+                    else {
+                        var salary = sum * (pct / 100);
+                        masterTotals[m.name] += salary;
+                        bodyHtml += '<td class="success">' + Utils.fmtMoney(Math.round(salary)) + '</td>';
+                    }
+                });
+                bodyHtml += '</tr>';
+            });
+            if (activeMasters.length > 0) {
+                bodyHtml += '<tr class="row-total"><td>ИТОГО</td>';
+                activeMasters.forEach(function(m) { bodyHtml += '<td>' + Utils.fmtMoney(Math.round(masterTotals[m.name])) + '</td>'; });
+                bodyHtml += '</tr>';
+            } else {
+                bodyHtml = '<tr><td colspan="2" style="text-align:center;color:var(--text-3);padding:30px">Отметьте мастеров</td></tr>';
+            }
+            UI.$('salaryBody').innerHTML = bodyHtml;
 
-        // ============ АВАНСЫ (только наличные) ============
+            // --- Карточки (мобильные) ---
+            // Находим контейнер .salary-wrap
+            var wrap = document.querySelector('.salary-wrap');
+            if (!wrap) return;
+            var existing = wrap.querySelector('.salary-cards-mobile');
+            if (existing) existing.remove();
+
+            var cardsWrap = document.createElement('div');
+            cardsWrap.className = 'salary-cards-mobile';
+
+            if (activeMasters.length === 0) {
+                cardsWrap.innerHTML = '<div class="cash-empty">Отметьте мастеров на смене</div>';
+            } else {
+                activeMasters.forEach(function(m) {
+                    var card = document.createElement('div');
+                    card.className = 'salary-card-mobile';
+                    var rows = '<div class="name"><span>' + m.name + '</span><span class="total">' + Utils.fmtMoney(Math.round(masterTotals[m.name])) + '</span></div>';
+                    d.services.forEach(function(svc) {
+                        if (!svc || !svc.name) return;
+                        var pct = svc.percents[m.name];
+                        if (pct === undefined) return;
+                        var sum = serviceSums[svc.name] || 0;
+                        var salary = sum * (pct / 100);
+                        rows += '<div class="row">' +
+                            '<span class="label">' + svc.name + ' · ' + pct + '%</span>' +
+                            '<span class="value">' + Utils.fmtMoney(Math.round(salary)) + '</span>' +
+                            '</div>';
+                    });
+                    card.innerHTML = rows;
+                    cardsWrap.appendChild(card);
+                });
+            }
+            wrap.appendChild(cardsWrap);
+        },
+
         renderAdvances: function(d) {
             var html = '';
             var total = 0;
@@ -2190,7 +2207,6 @@ if (activeMasters.length > 0) {
             });
         },
 
-        // ============ РАСХОДЫ ============
         renderExpenses: function(d) {
             var html = '';
             var total = 0;
@@ -2228,7 +2244,6 @@ if (activeMasters.length > 0) {
             });
         },
 
-        // ============ КАССА ============
         renderCash: function(d) {
             var incomeCash = d.pump.cash || 0;
             d.cars.forEach(function(c) {
@@ -2236,7 +2251,6 @@ if (activeMasters.length > 0) {
                     if (svc.payment === 'cash') incomeCash += Number(svc.amount) || 0;
                 });
             });
-            // 🔑 Все авансы уменьшают кассу
             var advancesCash = d.advances.reduce(function(sum, a) {
                 return sum + (Number(a.amount) || 0);
             }, 0);
@@ -2470,81 +2484,70 @@ if (activeMasters.length > 0) {
             UI.$('combinedBody').innerHTML = html;
         },
 
-renderMarks: function(data) {
-    // 🆕 Пометки — ЕДИНЫЕ для двух филиалов (без фильтра по branch)
-    var allItems = [];
+        // ============ ПОМЕТКИ — ЕДИНЫЕ ДЛЯ ДВУХ ФИЛИАЛОВ ============
+        renderMarks: function(data) {
+            // 🔑 НЕ фильтруем по branch — показываем ВСЕ пометки
+            // Иконка филиала видна в каждой строке
+            var allItems = [];
 
-    // Авансы из кассы (из Тетрадки) — оба филиала
-    (data.advances || []).forEach(function(a) {
-        allItems.push({
-            id: 'cassa_' + a.id,
-            type: 'adv-cassa',
-            master: a.master,
-            amount: a.amount,
-            comment: a.comment || '',
-            date: a.date,
-            branch: a.branch || '',
-            readonly: true
-        });
-    });
-
-    // Пометки (остаток / долг / премия / аванс вне кассы) — оба филиала
-    (data.marks || []).forEach(function(m) {
-        allItems.push({
-            id: m.id,
-            type: m.type,
-            master: m.master,
-            amount: m.amount,
-            comment: m.comment || '',
-            date: m.date,
-            branch: m.branch || '',
-            readonly: false
-        });
-    });
-
-    allItems.sort(function(a, b) { return a.date < b.date ? 1 : -1; });
-
-    var html = '';
-    if (allItems.length === 0) {
-        html = '<div class="cash-empty">Нет пометок за месяц</div>';
-    } else {
-        allItems.forEach(function(item) {
-            var typeLabel = item.type === 'adv-cassa' ? '💵 Аванс (касса)'
-                          : item.type === 'adv' ? '💰 Аванс (вне)'
-                          : item.type === 'warn' ? '🟡 Остаток'
-                          : item.type === 'bad' ? '🔴 Долг'
-                          : '🟢 Премия';
-            var branchTag = item.branch === 'ryabinina' ? '🏠'
-                          : item.branch === 'amundsena' ? '🏭'
-                          : '';
-
-            html += '<div class="mark-item ' + item.type + '">';
-            html += '<div class="date">' + item.date.slice(8) + '.' + item.date.slice(5, 7) + '</div>';
-            html += '<div><span class="master">' + item.master + '</span>' +
-                    (branchTag ? ' <span style="opacity:0.6;font-size:10px">' + branchTag + '</span>' : '') +
-                    (item.comment ? '<span class="comment">· ' + item.comment + '</span>' : '') +
-                    '</div>';
-            html += '<div class="amount">' + Utils.fmtMoney(item.amount) + '</div>';
-            html += '<div style="display:flex;gap:6px;align-items:center">';
-            html += '<span class="type">' + typeLabel + '</span>';
-            if (item.readonly) html += '<button class="del disabled" disabled title="Из кассы">🔒</button>';
-            else html += '<button class="del" data-mark-del="' + item.id + '">✕</button>';
-            html += '</div></div>';
-        });
-    }
-    UI.$('marksList').innerHTML = html;
-
-    document.querySelectorAll('[data-mark-del]').forEach(function(btn) {
-        btn.addEventListener('click', function() {
-            Api.deleteMark(btn.dataset.markDel).then(function() {
-                UI.toast('Пометка удалена', 'success');
-                State.salaryMonthData = null;
-                State.salaryMonthLoadedKey = null;
-                Zarp.loadAndRender(true);
+            (data.advances || []).forEach(function(a) {
+                allItems.push({
+                    id: 'cassa_' + a.id, type: 'adv-cassa',
+                    master: a.master, amount: a.amount,
+                    comment: a.comment || '', date: a.date,
+                    branch: a.branch || '',
+                    readonly: true
+                });
             });
-        });
-    });
-},
+
+            (data.marks || []).forEach(function(m) {
+                allItems.push({
+                    id: m.id, type: m.type,
+                    master: m.master, amount: m.amount,
+                    comment: m.comment || '', date: m.date,
+                    branch: m.branch || '',
+                    readonly: false
+                });
+            });
+
+            allItems.sort(function(a, b) { return a.date < b.date ? 1 : -1; });
+
+            var html = '';
+            if (allItems.length === 0) html = '<div class="cash-empty">Нет пометок за месяц</div>';
+            else {
+                allItems.forEach(function(item) {
+                    var typeLabel = item.type === 'adv-cassa' ? '💵 Аванс (касса)'
+                                  : item.type === 'adv' ? '💰 Аванс (вне)'
+                                  : item.type === 'warn' ? '🟡 Остаток'
+                                  : item.type === 'bad' ? '🔴 Долг'
+                                  : '🟢 Премия';
+                    var branchIco = item.branch === 'ryabinina' ? '🏠' : (item.branch === 'amundsena' ? '🏭' : '•');
+                    html += '<div class="mark-item ' + item.type + '">';
+                    html += '<div class="date">' + item.date.slice(8) + '.' + item.date.slice(5, 7) + '</div>';
+                    html += '<div class="branch-ico" title="' + (item.branch === 'ryabinina' ? 'Рябинина' : item.branch === 'amundsena' ? 'Амундсена' : '—') + '">' + branchIco + '</div>';
+                    html += '<div><span class="master">' + item.master + '</span>' + (item.comment ? '<span class="comment">· ' + item.comment + '</span>' : '') + '</div>';
+                    html += '<div class="amount">' + Utils.fmtMoney(item.amount) + '</div>';
+                    html += '<div style="display:flex;gap:6px;align-items:center">';
+                    html += '<span class="type">' + typeLabel + '</span>';
+                    if (item.readonly) html += '<button class="del disabled" disabled title="Из кассы">🔒</button>';
+                    else html += '<button class="del" data-mark-del="' + item.id + '">✕</button>';
+                    html += '</div></div>';
+                });
+            }
+            UI.$('marksList').innerHTML = html;
+
+            document.querySelectorAll('[data-mark-del]').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    Api.deleteMark(btn.dataset.markDel).then(function() {
+                        UI.toast('Пометка удалена', 'success');
+                        State.salaryMonthData = null;
+                        State.salaryMonthLoadedKey = null;
+                        Zarp.loadAndRender(true);
+                    });
+                });
+            });
+        },
+
         openMarkModal: function() {
             var content = UI.$('markModalContent');
             content.className = 'modal-content';
@@ -2659,7 +2662,6 @@ renderMarks: function(data) {
                     App.applyBootstrap(data);
                     App.renderAll();
                     App.saveToCache();
-                    // 🔑 Перерисовываем услуги в Новой записи (после загрузки)
                     NewRecord.renderServicesGrid();
                 } else if (!cached) {
                     return App.fallbackLoad();
@@ -2874,7 +2876,6 @@ renderMarks: function(data) {
                     if (window.innerWidth <= 900) App.toggleSidebar(false);
                 });
 
-                // 🔑 Прелоад при hover / touch
                 var preloadPage = function() {
                     var page = item.dataset.page;
                     if (page === 'tetradka' && !State.tetradkaLoaded[State.tetradkaBranch]) {
@@ -2967,7 +2968,6 @@ renderMarks: function(data) {
             flatpickr.localize(flatpickr.l10ns.ru);
             State.tetradkaDate = new Date().toISOString().slice(0, 10);
 
-            // 🚀 Bootstrap — один запрос, без тяжёлых данных
             App.bootstrap();
 
             setInterval(function() {
