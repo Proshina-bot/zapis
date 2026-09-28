@@ -15,7 +15,6 @@
 </head>
 <body>
 
-<!-- МОБИЛЬНЫЙ ХЕДЕР -->
 <header class="mobile-header">
     <button class="burger" id="burgerBtn" aria-label="Меню">☰</button>
     <div class="title">
@@ -43,29 +42,16 @@
 
         <div class="nav-group">
             <div class="nav-group-title">Работа</div>
-            <button class="nav-item active" data-page="newRecord">
-                <span class="icon">✦</span> Новая запись
-            </button>
-            <button class="nav-item" data-page="price">
-                <span class="icon">₽</span> Прайс-лист
-            </button>
-            <button class="nav-item" data-page="tetradka">
-                <span class="icon">📓</span> Тетрадка
-            </button>
-            <button class="nav-item" data-page="zarplaty">
-                <span class="icon">💰</span> Зарплаты
-            </button>
+            <button class="nav-item active" data-page="newRecord"><span class="icon">✦</span> Новая запись</button>
+            <button class="nav-item" data-page="price"><span class="icon">₽</span> Прайс-лист</button>
+            <button class="nav-item" data-page="tetradka"><span class="icon">📓</span> Тетрадка</button>
+            <button class="nav-item" data-page="zarplaty"><span class="icon">💰</span> Зарплаты</button>
         </div>
 
         <div class="nav-group">
             <div class="nav-group-title">Клиенты</div>
-            <button class="nav-item" data-page="clients">
-                <span class="icon">◉</span> База клиентов
-                <span class="badge" id="clientsBadge">0</span>
-            </button>
-            <button class="nav-item" data-page="journal">
-                <span class="icon">▤</span> Журнал
-            </button>
+            <button class="nav-item" data-page="clients"><span class="icon">◉</span> База клиентов<span class="badge" id="clientsBadge">0</span></button>
+            <button class="nav-item" data-page="journal"><span class="icon">▤</span> Журнал</button>
         </div>
     </aside>
 
@@ -97,22 +83,13 @@
             </div>
 
             <div class="stats-panel">
-                <div class="stat-card">
-                    <div class="stat-label">Свободно</div>
-                    <div class="stat-value accent" id="statFreeSlots">—</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Записей на дату</div>
-                    <div class="stat-value" id="statBooked">—</div>
-                </div>
+                <div class="stat-card"><div class="stat-label">Свободно</div><div class="stat-value accent" id="statFreeSlots">—</div></div>
+                <div class="stat-card"><div class="stat-label">Записей на дату</div><div class="stat-value" id="statBooked">—</div></div>
             </div>
 
             <div class="work-grid">
                 <div class="card">
-                    <div class="card-title">
-                        <span>Доступное время</span>
-                        <span class="badge" id="freeCounter">0 свободно</span>
-                    </div>
+                    <div class="card-title"><span>Доступное время</span><span class="badge" id="freeCounter">0 свободно</span></div>
                     <div class="time-slots" id="slotsContainer"></div>
                 </div>
 
@@ -123,7 +100,7 @@
 
                     <div class="form-group">
                         <label>Телефон клиента</label>
-                        <input type="tel" id="phone" class="form-control" placeholder="+7 (___) ___-__-__" autocomplete="off" inputmode="tel">
+                        <input type="tel" id="phone" class="form-control" value="+7 ( " autocomplete="off" inputmode="tel">
                         <div class="autocomplete-hint" id="autocompleteHint"></div>
                     </div>
 
@@ -169,9 +146,7 @@
                         <textarea id="comment" class="form-control" placeholder="Особые пожелания..."></textarea>
                     </div>
 
-                    <button class="submit-btn" id="submitBtn" disabled>
-                        <span id="submitText">✚ Записать клиента</span>
-                    </button>
+                    <button class="submit-btn" id="submitBtn" disabled><span id="submitText">✚ Записать клиента</span></button>
                 </div>
             </div>
         </div>
@@ -189,9 +164,7 @@
                         <button class="branch-btn-lg price-branch" data-branch="amundsena">🏭 Амундсена</button>
                     </div>
                 </div>
-                <div class="page-header-right">
-                    <button class="btn" id="reloadPricesBtn">↻ Обновить</button>
-                </div>
+                <div class="page-header-right"><button class="btn" id="reloadPricesBtn">↻ Обновить</button></div>
             </div>
             <div id="priceContent"></div>
         </div>
@@ -235,27 +208,18 @@
                 </div>
 
                 <div class="card">
-                    <div class="card-title">
-                        <span>💨 Подкачка</span>
-                        <span class="badge success" id="pumpTotal">0 ₽</span>
-                    </div>
+                    <div class="card-title"><span>💨 Подкачка</span><span class="badge success" id="pumpTotal">0 ₽</span></div>
                     <div class="pump-table" id="pumpTable"></div>
                 </div>
             </div>
 
             <div class="card">
-                <div class="card-title">
-                    <span>👥 Мастера на смене</span>
-                    <span class="badge" id="mastersCount">0 выбрано</span>
-                </div>
+                <div class="card-title"><span>👥 Мастера на смене</span><span class="badge" id="mastersCount">0 выбрано</span></div>
                 <div class="masters-row" id="mastersRow"></div>
             </div>
 
             <div class="card">
-                <div class="card-title">
-                    <span>📋 Услуги и проценты (% от суммы услуги)</span>
-                    <button class="btn xs" id="addServiceBtn">+ Услуга</button>
-                </div>
+                <div class="card-title"><span>📋 Услуги и проценты (% от суммы услуги)</span><button class="btn xs" id="addServiceBtn">+ Услуга</button></div>
                 <div class="services-table-wrap">
                     <table class="services-table" id="servicesTable">
                         <thead id="servicesHead"></thead>
@@ -264,15 +228,11 @@
                 </div>
             </div>
 
-            <!-- МАШИНЫ ЗА ДЕНЬ — с новым управлением скрытия -->
             <div class="card">
                 <div class="card-title">
                     <span>🚗 Машины за день</span>
-                    <div class="card-title-actions">
-                        <span class="badge" id="carsCount">0 машин</span>
-                    </div>
+                    <div class="card-title-actions"><span class="badge" id="carsCount">0 машин</span></div>
                 </div>
-
                 <div class="cars-hide-controls">
                     <div class="cars-hide-input-group">
                         <label>Скрыть</label>
@@ -282,11 +242,8 @@
                     <button class="btn xs primary" id="applyHideCarsBtn">Скрыть</button>
                     <button class="btn xs" id="showAllCarsBtn">Показать все</button>
                 </div>
-
                 <div class="cars-list" id="carsList"></div>
-                <button class="add-car-btn" id="addCarBtn">
-                    <span>+</span> Добавить машину
-                </button>
+                <button class="add-car-btn" id="addCarBtn"><span>+</span> Добавить машину</button>
             </div>
 
             <div class="card">
@@ -307,33 +264,12 @@
             <div class="card">
                 <div class="card-title"><span>🏦 Касса</span></div>
                 <div class="cash-block">
-
                     <div class="cash-row-top">
-                        <div class="cash-cell">
-                            <div class="label">Начало дня</div>
-                            <input type="number" id="cashStart" value="0" min="0" step="100">
-                            <div class="hint">Авто с прошлого дня</div>
-                        </div>
-                        <div class="cash-cell">
-                            <div class="label">Поступления (нал)</div>
-                            <div class="static" id="cashIncome">0 ₽</div>
-                            <div class="hint">Автоматически</div>
-                        </div>
-                        <div class="cash-cell">
-                            <div class="label">Авансы</div>
-                            <div class="static" id="cashAdvances">0 ₽</div>
-                            <div class="hint">Сумма выданного</div>
-                        </div>
-                        <div class="cash-cell">
-                            <div class="label">Расходы</div>
-                            <div class="static" id="cashExpenses">0 ₽</div>
-                            <div class="hint">Сумма расходов</div>
-                        </div>
-                        <div class="cash-cell total">
-                            <div class="label">Итого в кассе</div>
-                            <div class="static" id="cashTotal">0 ₽</div>
-                            <div class="hint">Начало + Нал − Авансы − Расходы</div>
-                        </div>
+                        <div class="cash-cell"><div class="label">Начало дня</div><input type="number" id="cashStart" value="0" min="0" step="100"><div class="hint">Авто с прошлого дня</div></div>
+                        <div class="cash-cell"><div class="label">Поступления (нал)</div><div class="static" id="cashIncome">0 ₽</div><div class="hint">Автоматически</div></div>
+                        <div class="cash-cell"><div class="label">Авансы</div><div class="static" id="cashAdvances">0 ₽</div><div class="hint">Сумма выданного</div></div>
+                        <div class="cash-cell"><div class="label">Расходы</div><div class="static" id="cashExpenses">0 ₽</div><div class="hint">Сумма расходов</div></div>
+                        <div class="cash-cell total"><div class="label">Итого в кассе</div><div class="static" id="cashTotal">0 ₽</div><div class="hint">Начало + Нал − Авансы − Расходы</div></div>
                     </div>
 
                     <div class="cash-subblock">
@@ -353,7 +289,6 @@
                         <div class="cash-list" id="expensesList"></div>
                         <button class="cash-add-btn" id="addExpenseBtn">+ Добавить расход</button>
                     </div>
-
                 </div>
             </div>
         </div>
@@ -376,24 +311,16 @@
                         <button id="nextMonth">›</button>
                     </div>
                 </div>
-                <div class="page-header-actions">
-                    <button class="btn warning" id="closeMonthBtn">🔒 Закрыть месяц</button>
-                </div>
+                <div class="page-header-actions"><button class="btn warning" id="closeMonthBtn">🔒 Закрыть месяц</button></div>
             </div>
 
             <div class="card">
-                <div class="card-title">
-                    <span>📊 Итоги за месяц (текущий филиал)</span>
-                    <span class="badge" id="daysCount">0 дней</span>
-                </div>
+                <div class="card-title"><span>📊 Итоги за месяц (текущий филиал)</span><span class="badge" id="daysCount">0 дней</span></div>
                 <div class="summary-grid" id="monthSummary"></div>
             </div>
 
             <div class="card">
-                <div class="card-title">
-                    <span>📅 Сводка по дням месяца</span>
-                    <span class="badge accent">слева — выручка, справа — зарплата мастеров</span>
-                </div>
+                <div class="card-title"><span>📅 Сводка по дням месяца</span><span class="badge accent">слева — выручка, справа — зарплата мастеров</span></div>
                 <div class="tbl-wrap">
                     <table class="tbl" id="daysTable">
                         <thead id="daysHead"></thead>
@@ -403,21 +330,10 @@
             </div>
 
             <div class="card">
-                <div class="card-title">
-                    <span>💰 Итоги по двум филиалам</span>
-                    <span class="badge accent">Рябина + Амундсена</span>
-                </div>
+                <div class="card-title"><span>💰 Итоги по двум филиалам</span><span class="badge accent">Рябина + Амундсена</span></div>
                 <div class="tbl-wrap">
                     <table class="tbl" id="combinedTable">
-                        <thead>
-                            <tr>
-                                <th>Мастер</th>
-                                <th>Зарплата</th>
-                                <th>Авансы</th>
-                                <th>Остаток</th>
-                                <th>Долг / Премия</th>
-                            </tr>
-                        </thead>
+                        <thead><tr><th>Мастер</th><th>Зарплата</th><th>Авансы</th><th>Остаток</th><th>Долг / Премия</th></tr></thead>
                         <tbody id="combinedBody"></tbody>
                     </table>
                 </div>
@@ -441,52 +357,30 @@
         <!-- ==================== БАЗА КЛИЕНТОВ ==================== -->
         <div class="page" id="page-clients">
             <div class="page-header">
-                <div class="page-header-title">
-                    <h2>База клиентов</h2>
-                    <div class="subtitle">Постоянные клиенты и их история</div>
-                </div>
+                <div class="page-header-title"><h2>База клиентов</h2><div class="subtitle">Постоянные клиенты и их история</div></div>
                 <div class="badge accent" id="clientsCounter" style="padding:6px 14px;font-size:12px">0 клиентов</div>
             </div>
-            <div class="clients-toolbar">
-                <input type="text" id="clientSearch" class="search-input" placeholder="🔍 Поиск по имени, телефону или марке...">
-            </div>
+            <div class="clients-toolbar"><input type="text" id="clientSearch" class="search-input" placeholder="🔍 Поиск по имени, телефону или марке..."></div>
             <div id="clientsList"></div>
         </div>
 
         <!-- ==================== ЖУРНАЛ ==================== -->
         <div class="page" id="page-journal">
             <div class="page-header">
-                <div class="page-header-title">
-                    <h2>Журнал записей</h2>
-                    <div class="subtitle">Все записи клиентов</div>
-                </div>
+                <div class="page-header-title"><h2>Журнал записей</h2><div class="subtitle">Все записи клиентов</div></div>
                 <div class="badge accent" id="journalCounter" style="padding:6px 14px;font-size:12px">0 записей</div>
             </div>
-            <div class="clients-toolbar">
-                <input type="text" id="journalSearch" class="search-input" placeholder="🔍 Поиск по имени, телефону, марке, услуге, дате...">
-            </div>
+            <div class="clients-toolbar"><input type="text" id="journalSearch" class="search-input" placeholder="🔍 Поиск по имени, телефону, марке, услуге, дате..."></div>
             <div class="journal-list" id="journalList"></div>
         </div>
 
     </main>
 </div>
 
-<!-- ==================== МОДАЛКИ ==================== -->
-<div class="modal-overlay" id="clientModal">
-    <div class="modal-content" id="clientModalContent"></div>
-</div>
-
-<div class="modal-overlay" id="recordModal">
-    <div class="modal-content" id="recordModalContent"></div>
-</div>
-
-<div class="modal-overlay" id="moveModal">
-    <div class="modal-content" id="moveModalContent"></div>
-</div>
-
-<div class="modal-overlay" id="markModal">
-    <div class="modal-content" id="markModalContent"></div>
-</div>
+<div class="modal-overlay" id="clientModal"><div class="modal-content" id="clientModalContent"></div></div>
+<div class="modal-overlay" id="recordModal"><div class="modal-content" id="recordModalContent"></div></div>
+<div class="modal-overlay" id="moveModal"><div class="modal-content" id="moveModalContent"></div></div>
+<div class="modal-overlay" id="markModal"><div class="modal-content" id="markModalContent"></div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ru.js"></script>
