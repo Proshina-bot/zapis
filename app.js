@@ -1,6 +1,7 @@
 /* ============================================================
- * PRO-шина · CRM — app.js v2.2
+ * PRO-шина · CRM — app.js v2.4
  * Локальный кэш только для подтверждённых сервером данных
+ * Ленивая загрузка Тетрадки и Зарплат
  * ============================================================ */
 
 (function() {
@@ -10,30 +11,28 @@
     // ⚙️ CONFIG
     // ================================================================
     var Config = {
-        APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbzcxPNFhdNfeM_W3SJcDqivV7Tk1hf2DgUM9_wF_xbx05FYx4ig9tqAEfOUF2Sn-HFA/exec', // ← ЗАМЕНИТЕ
+        APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbx9pV5or2NUd1rIzUylc0G7N4OmEfyZcK67D_jp0l2dzsruQaH4fQIz3_Roo-fvjjeR/exec', // ← ЗАМЕНИТЕ
         CARS: ['1', '2', '3'],
         SIZES: ['R13','R14','R15','R16','R17','R18','R19','R20','R21','R22','R23'],
-        REFRESH_INTERVAL: 30000,      // общий фон-поллинг (30 сек)
-        CACHE_TTL: 30000,
+        REFRESH_INTERVAL: 60000,       // фон-обновление 60 сек
+        CACHE_TTL: 60000,
         FETCH_TIMEOUT: 20000,
         MAX_RETRIES: 2,
-        AUTOSAVE_INTERVAL: 30000,     // Тетрадка автосохранение
-        LOCAL_CACHE_KEY: 'proshina_cache_v3',
-        LOCAL_CACHE_MAX_AGE: 600000   // 10 мин — показываем кэш с пометкой
+        AUTOSAVE_INTERVAL: 30000,
+        LOCAL_CACHE_KEY: 'proshina_cache_v4',
+        LOCAL_CACHE_MAX_AGE: 600000
     };
 
     // ================================================================
-    // 💾 LOCAL CACHE — только для подтверждённых данных
+    // 💾 LOCAL CACHE
     // ================================================================
     var LocalCache = {
         save: function(data) {
             try {
                 localStorage.setItem(Config.LOCAL_CACHE_KEY, JSON.stringify({
                     records: data.records || null,
-                    tetradka: data.tetradka || null,
                     prices: data.prices || null,
                     masters: data.masters || null,
-                    salaryMonth: data.salaryMonth || null,
                     ts: Date.now()
                 }));
             } catch (e) {}
@@ -44,11 +43,10 @@
                 if (!raw) return null;
                 var parsed = JSON.parse(raw);
                 if (!parsed.ts) return null;
-                var age = Date.now() - parsed.ts;
                 return {
                     data: parsed,
-                    age: age,
-                    isStale: age > Config.LOCAL_CACHE_MAX_AGE
+                    age: Date.now() - parsed.ts,
+                    isStale: (Date.now() - parsed.ts) > Config.LOCAL_CACHE_MAX_AGE
                 };
             } catch (e) { return null; }
         },
@@ -64,7 +62,6 @@
         // CRM
         occupiedSlots: {},
         clientsDatabase: {},
-        isFromCache: false,
 
         // Новая запись
         currentBranch: 'ryabinina',
@@ -85,12 +82,15 @@
         mastersList: [],
         tetradka: { ryabinina: null, amundsena: null },
         tetradkaLoaded: { ryabinina: false, amundsena: false },
+        hideProcessedRecords: false,
+        carsLimit: 10,
 
         // Зарплаты
         zarpBranch: 'ryabinina',
         zarpYear: new Date().getFullYear(),
         zarpMonth: new Date().getMonth(),
         salaryMonthData: null,
+        salaryMonthLoadedKey: null,
 
         // Служебные
         isUpdating: false,
@@ -136,16 +136,9 @@
             return tryOnce();
         },
 
-        // 🚀 Bootstrap — один запрос вместо шести
-        getBootstrap: function(date, year, month, branch) {
+        getBootstrap: function() {
             if (State.bootstrapInFlight) return State.bootstrapInFlight;
-            State.bootstrapInFlight = Api._fetch({
-                action: 'getBootstrap',
-                date: date,
-                year: year,
-                month: month,
-                branch: branch
-            }, 2, 25000).then(function(r) {
+            State.bootstrapInFlight = Api._fetch({ action: 'getBootstrap' }, 2, 25000).then(function(r) {
                 State.bootstrapInFlight = null;
                 if (r && !r.error) State.lastBootstrapAt = Date.now();
                 return r;
@@ -153,28 +146,25 @@
             return State.bootstrapInFlight;
         },
 
-        // Точечные
         getAll: function() { return Api._fetch({ action: 'getAll' }); },
-        createRecord: function(data) { return Api._fetch(Object.assign({ action: 'new' }, data)); },
-        deleteRecord: function(slotKey) { return Api._fetch({ action: 'delete', slotKey: slotKey }); },
+        createRecord: function(data) { return Api._fetch(Object.assign({ action: 'new' }, data), 1); },
+        deleteRecord: function(slotKey) { return Api._fetch({ action: 'delete', slotKey: slotKey }, 1); },
         moveRecord: function(oldKey, newKey, data) {
-            return Api._fetch(Object.assign({ action: 'move', oldSlotKey: oldKey, newSlotKey: newKey }, data));
+            return Api._fetch(Object.assign({ action: 'move', oldSlotKey: oldKey, newSlotKey: newKey }, data), 1);
         },
         saveExtra: function(slotKey, extraComment, rating, phone) {
-            return Api._fetch({ action: 'saveExtraComment', slotKey: slotKey, extraComment: extraComment, rating: rating, phone: phone });
+            return Api._fetch({ action: 'saveExtraComment', slotKey: slotKey, extraComment: extraComment, rating: rating, phone: phone }, 1);
         },
         getPrices: function() { return Api._fetch({ action: 'getPrices' }); },
         getMasters: function() { return Api._fetch({ action: 'getMasters' }); },
         getSalaryDay: function(date, branch) { return Api._fetch({ action: 'getSalaryDay', date: date, branch: branch }); },
         saveSalaryDay: function(data) { return Api._fetch(Object.assign({ action: 'saveSalaryDay' }, data), 1, 30000); },
-        getSalaryMonth: function(year, month) { return Api._fetch({ action: 'getSalaryMonth', year: year, month: month }); },
-        addMark: function(data) { return Api._fetch(Object.assign({ action: 'addMark' }, data)); },
-        deleteMark: function(id) { return Api._fetch({ action: 'deleteMark', id: id }); },
-        closeMonth: function(data) { return Api._fetch(Object.assign({ action: 'closeMonth' }, data)); },
-
-        // 🆕 Новые
+        getSalaryMonth: function(year, month) { return Api._fetch({ action: 'getSalaryMonth', year: year, month: month }, 2, 25000); },
+        addMark: function(data) { return Api._fetch(Object.assign({ action: 'addMark' }, data), 1); },
+        deleteMark: function(id) { return Api._fetch({ action: 'deleteMark', id: id }, 1); },
+        closeMonth: function(data) { return Api._fetch(Object.assign({ action: 'closeMonth' }, data), 1, 30000); },
         updateRecordStatus: function(recordKey, status) {
-            return Api._fetch({ action: 'updateRecordStatus', recordKey: recordKey, status: status });
+            return Api._fetch({ action: 'updateRecordStatus', recordKey: recordKey, status: status }, 1);
         },
         getRecordPayment: function(recordKey) {
             return Api._fetch({ action: 'getRecordPayment', recordKey: recordKey });
@@ -342,6 +332,22 @@
     };
 
     // ================================================================
+    // 💳 PAYMENTS
+    // ================================================================
+    var Payments = {
+        data: {
+            bn:      { label: 'Б/Н' },
+            cash:    { label: 'Нал' },
+            card:    { label: 'Карта' },
+            almir:   { label: 'Альмир' },
+            sbp:     { label: 'СБП' },
+            invoice: { label: 'По счёту' }
+        },
+        label: function(code) { return Payments.data[code] ? Payments.data[code].label : code; },
+        all: function() { return Object.keys(Payments.data); }
+    };
+
+    // ================================================================
     // 📝 NEW RECORD
     // ================================================================
     var NewRecord = {
@@ -406,24 +412,39 @@
             });
 
             UI.$('submitBtn').addEventListener('click', NewRecord.submit);
+
+            // 🔑 Инициализация услуг сразу
+            NewRecord.renderServicesGrid();
         },
 
         renderServicesGrid: function() {
+            if (!State.currentBranch) State.currentBranch = 'ryabinina';
+
             var list = State.currentBranch === 'ryabinina'
                 ? ['Комплекс', 'СУ+Баланс', 'Ремонт', 'Правка']
                 : ['Комплекс', 'СУ+Баланс', 'Ремонт', 'Правка', 'Кондиционер', 'Слесарка'];
+
             var grid = UI.$('servicesGrid');
+            if (!grid) return;
+
             grid.innerHTML = '';
             State.selectedServices = [];
             var fragment = document.createDocumentFragment();
+
             list.forEach(function(svc) {
                 var btn = document.createElement('button');
                 btn.className = 'service-btn';
+                btn.dataset.service = svc;
                 btn.innerHTML = '<span>' + svc + '</span>';
                 btn.addEventListener('click', function() {
                     var idx = State.selectedServices.indexOf(svc);
-                    if (idx === -1) { State.selectedServices.push(svc); this.classList.add('selected'); }
-                    else { State.selectedServices.splice(idx, 1); this.classList.remove('selected'); }
+                    if (idx === -1) {
+                        State.selectedServices.push(svc);
+                        this.classList.add('selected');
+                    } else {
+                        State.selectedServices.splice(idx, 1);
+                        this.classList.remove('selected');
+                    }
                     NewRecord.updateSubmitState();
                 });
                 fragment.appendChild(btn);
@@ -505,14 +526,14 @@
                                 Records.openModal(slotKey);
                             });
                         } else {
-    freeCount++;
-    slot.className = 'slot free';
-    slot.textContent = 'ПУСТО';
-    slot.dataset.time = time;
-    slot.dataset.car = car;
-    slot.dataset.slotKey = slotKey;
-    slot.addEventListener('click', function() { NewRecord.selectSlot(time, car); });
-}
+                            freeCount++;
+                            slot.className = 'slot free';
+                            slot.textContent = 'ПУСТО';
+                            slot.dataset.time = time;
+                            slot.dataset.car = car;
+                            slot.dataset.slotKey = slotKey;
+                            slot.addEventListener('click', function() { NewRecord.selectSlot(time, car); });
+                        }
                         slotsRow.appendChild(slot);
                     });
                 }
@@ -529,21 +550,20 @@
             App.updateStats();
         },
 
-selectSlot: function(time, car) {
-    document.querySelectorAll('.slot.free').forEach(function(s) { s.classList.remove('selected'); });
-    // Ищем слот по data-атрибутам — надёжно
-    var slot = document.querySelector('.slot.free[data-time="' + time + '"][data-car="' + car + '"]');
-    if (slot) slot.classList.add('selected');
+        selectSlot: function(time, car) {
+            document.querySelectorAll('.slot.free').forEach(function(s) { s.classList.remove('selected'); });
+            var slot = document.querySelector('.slot.free[data-time="' + time + '"][data-car="' + car + '"]');
+            if (slot) slot.classList.add('selected');
 
-    State.currentSelection = {
-        date: UI.$('datePicker').value,
-        time: time,
-        car: car,
-        slotKey: Utils.normalizeSlotKey(State.currentBranch + '_' + UI.$('datePicker').value + '_' + time + '_' + car)
-    };
-    NewRecord.renderInfoBanner();
-    NewRecord.updateSubmitState();
-},
+            State.currentSelection = {
+                date: UI.$('datePicker').value,
+                time: time,
+                car: car,
+                slotKey: Utils.normalizeSlotKey(State.currentBranch + '_' + UI.$('datePicker').value + '_' + time + '_' + car)
+            };
+            NewRecord.renderInfoBanner();
+            NewRecord.updateSubmitState();
+        },
 
         renderInfoBanner: function() {
             var el = UI.$('slotInfoBanner');
@@ -556,20 +576,17 @@ selectSlot: function(time, car) {
             el.classList.add('show');
         },
 
-updateSubmitState: function() {
-    var phoneEl = UI.$('phone');
-    var submitEl = UI.$('submitBtn');
-    if (!phoneEl || !submitEl) return;
-    var phone = phoneEl.value.replace(/\D/g, '');
-    var hasSlot = !!State.currentSelection.slotKey;
-    var hasServices = State.selectedServices.length > 0;
-    var hasSize = !!State.selectedSize;
-    var hasPhone = phone.length >= 11;
-    var ready = hasSlot && hasServices && hasSize && hasPhone;
-    submitEl.disabled = !ready;
-    // ОТЛАДКА — откройте консоль и увидите, чего не хватает
-    console.log('Submit:', { hasSlot, hasServices, hasSize, hasPhone, phone: phone.length, services: State.selectedServices, size: State.selectedSize });
-},
+        updateSubmitState: function() {
+            var phoneEl = UI.$('phone');
+            var submitEl = UI.$('submitBtn');
+            if (!phoneEl || !submitEl) return;
+            var phone = phoneEl.value.replace(/\D/g, '');
+            var ready = State.currentSelection.slotKey &&
+                        State.selectedServices.length > 0 &&
+                        State.selectedSize &&
+                        phone.length >= 11;
+            submitEl.disabled = !ready;
+        },
 
         submit: function() {
             var phone = UI.$('phone').value.trim();
@@ -607,7 +624,6 @@ updateSubmitState: function() {
                     return;
                 }
 
-                // ✅ Успех — сервер вернул все записи
                 State.occupiedSlots = Utils.normalizeAllKeys(res);
                 App.rebuildClients();
                 App.saveToCache();
@@ -645,7 +661,7 @@ updateSubmitState: function() {
     };
 
     // ================================================================
-    // 📋 RECORDS — модалка записи
+    // 📋 RECORDS (модалка)
     // ================================================================
     var Records = {
         openModal: function(slotKey) {
@@ -665,8 +681,8 @@ updateSubmitState: function() {
             content.className = 'modal-content ' + (rating === 'good' ? 'good' : rating === 'bad' ? 'bad' : '');
 
             var paymentHtml = '';
-            if (payment && (payment.total > 0 || payment.services.length > 0)) {
-                var paymentRows = payment.services.map(function(s) {
+            if (payment && (payment.total > 0 || (payment.services && payment.services.length > 0))) {
+                var paymentRows = (payment.services || []).map(function(s) {
                     var amt = Number(s.amount) || 0;
                     if (!amt) return '';
                     return '<div class="payment-service"><span>' + (s.name || '') + (s.payment ? ' · ' + Payments.label(s.payment) : '') + '</span><span class="price">' + Utils.fmtMoney(amt) + '</span></div>';
@@ -937,7 +953,6 @@ updateSubmitState: function() {
                 var ratingScore = client ? Utils.formatRating(client) : '—';
                 var svcs = Utils.parseServices(e.services).join(', ') || '—';
 
-                // 🆕 Блок оплаты из Тетрадки
                 var paymentHtml = '';
                 if (e._payment && (e._payment.total > 0 || (e._payment.services && e._payment.services.length > 0))) {
                     var servicesList = (e._payment.services || [])
@@ -1120,7 +1135,6 @@ updateSubmitState: function() {
             Promise.all(keys.map(function(k) {
                 return Api.saveExtra(k, State.occupiedSlots[k].extraComment || '', target, State.occupiedSlots[k].phone || '');
             })).then(function(results) {
-                // Берём последний успешный ответ
                 for (var i = results.length - 1; i >= 0; i--) {
                     if (results[i] && !results[i].error) {
                         State.occupiedSlots = Utils.normalizeAllKeys(results[i]);
@@ -1141,7 +1155,7 @@ updateSubmitState: function() {
     };
 
     // ================================================================
-    // 💰 PRICES — только чтение
+    // 💰 PRICES
     // ================================================================
     var Prices = {
         get: function(branch) { return State.prices[branch] || null; },
@@ -1203,7 +1217,6 @@ updateSubmitState: function() {
                 if (!Utils.isJunkExtraInfo(cat.extraInfo)) html += '<div class="cat-extra-info">' + cat.extraInfo + '</div>';
                 html += '</div>';
 
-                // Мобильные карточки
                 mobileHtml += '<div class="price-mobile-cat"><div class="price-mobile-cat-title"><span class="category-icon">' + (cat.icon || '📋') + '</span><span>' + cat.title + '</span></div>';
                 cat.services.forEach(function(srv) {
                     var chips = [];
@@ -1224,23 +1237,7 @@ updateSubmitState: function() {
     };
 
     // ================================================================
-    // 💳 PAYMENTS — справочник способов оплаты
-    // ================================================================
-    var Payments = {
-        data: {
-            bn:      { label: 'Б/Н' },
-            cash:    { label: 'Нал' },
-            card:    { label: 'Карта' },
-            almir:   { label: 'Альмир' },
-            sbp:     { label: 'СБП' },
-            invoice: { label: 'По счёту' }
-        },
-        label: function(code) { return Payments.data[code] ? Payments.data[code].label : code; },
-        all: function() { return Object.keys(Payments.data); }
-    };
-
-    // ================================================================
-    // 📓 ТЕТРАДКА — с автосохранением
+    // 📓 ТЕТРАДКА
     // ================================================================
     var Tetradka = {
         _autoSaveTimer: null,
@@ -1281,6 +1278,34 @@ updateSubmitState: function() {
                 });
             });
 
+            // Скрыть обработанные
+            UI.$('toggleProcessedRecords').addEventListener('click', function() {
+                State.hideProcessedRecords = !State.hideProcessedRecords;
+                this.textContent = State.hideProcessedRecords ? '👁 Показать обработанные' : '👁 Скрыть обработанные';
+                this.classList.toggle('primary', State.hideProcessedRecords);
+                var d = Tetradka.getCurrent();
+                if (d) Tetradka.renderRecords(d);
+            });
+
+            // Показать ещё 10 машин
+            UI.$('showMoreCarsBtn').addEventListener('click', function() {
+                State.carsLimit += 10;
+                var d = Tetradka.getCurrent();
+                if (d) Tetradka.renderCars(d);
+            });
+
+            // Показать все / Свернуть
+            UI.$('toggleCarsLimit').addEventListener('click', function() {
+                var d = Tetradka.getCurrent();
+                if (!d) return;
+                if (State.carsLimit >= d.cars.length) {
+                    State.carsLimit = 10;
+                } else {
+                    State.carsLimit = d.cars.length;
+                }
+                Tetradka.renderCars(d);
+            });
+
             UI.$('addServiceBtn').addEventListener('click', function() {
                 var d = Tetradka.getCurrent();
                 if (!d) return;
@@ -1312,7 +1337,8 @@ updateSubmitState: function() {
                     id: 'adv_' + Date.now(),
                     master: (State.mastersList[0] ? State.mastersList[0].name : ''),
                     amount: 0,
-                    comment: ''
+                    comment: '',
+                    payment: 'cash'
                 });
                 Tetradka.markDirty();
                 Tetradka.renderAll();
@@ -1337,7 +1363,6 @@ updateSubmitState: function() {
 
             UI.$('saveTetradkaBtn').addEventListener('click', Tetradka.manualSave);
 
-            // Сохранение при закрытии вкладки
             window.addEventListener('beforeunload', function() {
                 if (Tetradka._hasChanges) {
                     var d = Tetradka.getCurrent();
@@ -1346,6 +1371,7 @@ updateSubmitState: function() {
                         d.services.forEach(function(svc) {
                             Object.keys(svc.percents).forEach(function(master) {
                                 if (!d.mastersOnShift[master]) return;
+                                if (!svc.name || svc.name === 'undefined') return;
                                 mastersData.push({ master: master, service: svc.name, percent: svc.percents[master] });
                             });
                         });
@@ -1371,7 +1397,6 @@ updateSubmitState: function() {
                 }
             });
 
-            // Обновление индикатора времени
             setInterval(function() { Tetradka.updateSaveStatus(); }, 10000);
         },
 
@@ -1448,6 +1473,7 @@ updateSubmitState: function() {
 
             var mastersData = [];
             d.services.forEach(function(svc) {
+                if (!svc.name || svc.name === 'undefined') return;
                 Object.keys(svc.percents).forEach(function(master) {
                     if (!d.mastersOnShift[master]) return;
                     mastersData.push({ master: master, service: svc.name, percent: svc.percents[master] });
@@ -1543,8 +1569,8 @@ updateSubmitState: function() {
                 masters: State.mastersList.slice(),
                 mastersOnShift: {},
                 services: [
-                    { name: 'шиномонтаж', percents: {}, fixed: true },
-                    { name: 'подкачка', percents: {}, fixed: true }
+                    { name: 'шиномонтаж', percents: {}, fixed: true, order: 0 },
+                    { name: 'подкачка', percents: {}, fixed: true, order: 1 }
                 ],
                 cars: [],
                 records: Tetradka.getRecordsForDate(date, branch),
@@ -1556,24 +1582,41 @@ updateSubmitState: function() {
 
         applyServerData: function(branch, date, res) {
             var servicesMap = {};
-            servicesMap['шиномонтаж'] = { name: 'шиномонтаж', percents: {}, fixed: true };
-            servicesMap['подкачка'] = { name: 'подкачка', percents: {}, fixed: true };
-var mastersOnShift = {};
+            servicesMap['шиномонтаж'] = { name: 'шиномонтаж', percents: {}, fixed: true, order: 0 };
+            servicesMap['подкачка'] = { name: 'подкачка', percents: {}, fixed: true, order: 1 };
+            var mastersOnShift = {};
 
-// 🆕 Если уже есть данные за этот день (например, был в State) — сохраняем отметки
-var existing = State.tetradka[branch];
-if (existing && existing.date === date && existing.mastersOnShift) {
-    Object.keys(existing.mastersOnShift).forEach(function(k) {
-        if (existing.mastersOnShift[k]) mastersOnShift[k] = true;
-    });
-}
+            var existing = State.tetradka[branch];
+            if (existing && existing.date === date && existing.mastersOnShift) {
+                Object.keys(existing.mastersOnShift).forEach(function(k) {
+                    if (existing.mastersOnShift[k]) mastersOnShift[k] = true;
+                });
+                if (existing.services && existing.services.length) {
+                    existing.services.forEach(function(svc) {
+                        if (!svc || !svc.name || svc.name === 'undefined') return;
+                        if (svc.fixed) return;
+                        servicesMap[svc.name] = {
+                            name: svc.name,
+                            percents: Object.assign({}, svc.percents || {}),
+                            fixed: false,
+                            order: svc.order !== undefined ? svc.order : 100
+                        };
+                    });
+                }
+            }
 
-// Добавляем тех, у кого есть записи в SalaryDays (гарантированно на смене)
-(res.masters || []).forEach(function(m) {
-    if (!servicesMap[m.service]) servicesMap[m.service] = { name: m.service, percents: {}, fixed: false };
-    servicesMap[m.service].percents[m.master] = m.percent;
-    mastersOnShift[m.master] = true;
-});
+            (res.masters || []).forEach(function(m) {
+                var svcName = String(m.service || '').trim();
+                if (!svcName || svcName === 'undefined' || svcName === 'null') return;
+                var masterName = String(m.master || '').trim();
+                if (!masterName) return;
+
+                if (!servicesMap[svcName]) {
+                    servicesMap[svcName] = { name: svcName, percents: {}, fixed: false, order: 100 };
+                }
+                servicesMap[svcName].percents[masterName] = Number(m.percent) || 0;
+                mastersOnShift[masterName] = true;
+            });
 
             var cars = (res.cars || []).map(function(c) {
                 var total = (c.services || []).reduce(function(s, x) { return s + (Number(x.amount) || 0); }, 0);
@@ -1592,7 +1635,6 @@ if (existing && existing.date === date && existing.mastersOnShift) {
 
             var recs = Tetradka.getRecordsForDate(date, branch);
 
-            // Применяем статусы из машин к записям
             recs.forEach(function(rec) {
                 var linkedCar = cars.find(function(c) { return c.recordKey === rec.key; });
                 if (linkedCar && linkedCar.recordStatus) {
@@ -1601,12 +1643,22 @@ if (existing && existing.date === date && existing.mastersOnShift) {
                 }
             });
 
+            var servicesList = Object.values(servicesMap)
+                .filter(function(s) { return s && s.name && s.name !== 'undefined'; })
+                .sort(function(a, b) {
+                    if (a.fixed && !b.fixed) return -1;
+                    if (!a.fixed && b.fixed) return 1;
+                    if (a.fixed && b.fixed) return (a.order || 0) - (b.order || 0);
+                    if ((a.order || 100) !== (b.order || 100)) return (a.order || 100) - (b.order || 100);
+                    return String(a.name).localeCompare(String(b.name));
+                });
+
             State.tetradka[branch] = {
                 date: date,
                 branch: branch,
                 masters: State.mastersList.slice(),
                 mastersOnShift: mastersOnShift,
-                services: Object.values(servicesMap),
+                services: servicesList,
                 cars: cars,
                 records: recs,
                 cash: res.cash || { start_cash: 0, expenses: [] },
@@ -1655,12 +1707,16 @@ if (existing && existing.date === date && existing.mastersOnShift) {
         // ============ ЗАПИСИ НА СЕГОДНЯ ============
         renderRecords: function(d) {
             var html = '';
-            var records = d.records || [];
-            var processed = records.filter(function(r) { return r.status !== 'pending'; }).length;
-            UI.$('recordsCount').textContent = processed + ' из ' + records.length;
+            var allRecords = d.records || [];
+            var processed = allRecords.filter(function(r) { return r.status !== 'pending'; }).length;
+            UI.$('recordsCount').textContent = processed + ' из ' + allRecords.length;
 
-            if (records.length === 0) {
-                UI.$('recordsList').innerHTML = '<div class="cash-empty">Нет записей на эту дату</div>';
+            var records = State.hideProcessedRecords
+                ? allRecords.filter(function(r) { return r.status === 'pending'; })
+                : allRecords;
+
+            if (records.length === 0 && allRecords.length > 0 && State.hideProcessedRecords) {
+                UI.$('recordsList').innerHTML = '<div class="cash-empty">Все записи обработаны. Нажмите «Показать обработанные», чтобы увидеть.</div>';
                 return;
             }
 
@@ -1689,7 +1745,6 @@ if (existing && existing.date === date && existing.mastersOnShift) {
             });
             UI.$('recordsList').innerHTML = html;
 
-            // Клик по info — открыть запись
             document.querySelectorAll('[data-open-record]').forEach(function(el) {
                 el.addEventListener('click', function() {
                     var key = el.dataset.openRecord;
@@ -1697,7 +1752,6 @@ if (existing && existing.date === date && existing.mastersOnShift) {
                 });
             });
 
-            // Подтвердить
             document.querySelectorAll('[data-confirm]').forEach(function(btn) {
                 btn.addEventListener('click', function() {
                     var key = btn.dataset.confirm;
@@ -1705,13 +1759,12 @@ if (existing && existing.date === date && existing.mastersOnShift) {
                     if (!rec) return;
                     rec.status = 'confirmed';
 
-                    // Создаём машину если её нет
-                    var carId = 'car_' + Date.now();
                     var existingCar = d.cars.find(function(c) { return c.recordKey === key; });
                     if (existingCar) {
                         existingCar.recordStatus = 'confirmed';
                         rec.linkedCarId = existingCar.id;
                     } else {
+                        var carId = 'car_' + Date.now();
                         d.cars.push({
                             id: carId,
                             car: rec.car,
@@ -1724,15 +1777,12 @@ if (existing && existing.date === date && existing.mastersOnShift) {
                         rec.linkedCarId = carId;
                     }
 
-                    // 🆕 Сохраняем статус на сервер
                     Api.updateRecordStatus(key, 'confirmed');
-
                     Tetradka.markDirty();
                     Tetradka.renderAll();
                 });
             });
 
-            // Отклонить
             document.querySelectorAll('[data-decline]').forEach(function(btn) {
                 btn.addEventListener('click', function() {
                     if (!confirm('Отклонить запись? Клиент не приехал?')) return;
@@ -1743,9 +1793,7 @@ if (existing && existing.date === date && existing.mastersOnShift) {
                     var existingCar = d.cars.find(function(c) { return c.recordKey === key; });
                     if (existingCar) existingCar.recordStatus = 'declined';
 
-                    // 🆕 Сохраняем статус на сервер
                     Api.updateRecordStatus(key, 'declined');
-
                     Tetradka.markDirty();
                     Tetradka.renderAll();
                 });
@@ -1776,36 +1824,31 @@ if (existing && existing.date === date && existing.mastersOnShift) {
             });
         },
 
-        // ============ МАСТЕРА НА СМЕНЕ ============
-renderMasters: function(d) {
-    var html = '';
-    d.masters.forEach(function(m) {
-        var on = d.mastersOnShift[m.name] ? 'on' : '';
-        html += '<div class="master-toggle ' + on + '" data-master="' + m.name + '"><span class="dot"></span><span>' + m.name + '</span></div>';
-    });
-    UI.$('mastersRow').innerHTML = html;
-    var count = Object.keys(d.mastersOnShift).filter(function(k) { return d.mastersOnShift[k]; }).length;
-    UI.$('mastersCount').textContent = count + ' выбрано';
+        // ============ МАСТЕРА ============
+        renderMasters: function(d) {
+            var html = '';
+            d.masters.forEach(function(m) {
+                var on = d.mastersOnShift[m.name] ? 'on' : '';
+                html += '<div class="master-toggle ' + on + '" data-master="' + m.name + '"><span class="dot"></span><span>' + m.name + '</span></div>';
+            });
+            UI.$('mastersRow').innerHTML = html;
+            var count = Object.keys(d.mastersOnShift).filter(function(k) { return d.mastersOnShift[k]; }).length;
+            UI.$('mastersCount').textContent = count + ' выбрано';
 
-    document.querySelectorAll('[data-master]').forEach(function(el) {
-        el.addEventListener('click', function() {
-            var name = el.dataset.master;
-            // toggle с проверкой
-            if (d.mastersOnShift[name]) {
-                delete d.mastersOnShift[name];
-            } else {
-                d.mastersOnShift[name] = true;
-            }
-            // 🆕 НЕ рендерим всё — обновляем только галочку этой кнопки
-            el.classList.toggle('on', !!d.mastersOnShift[name]);
-            var newCount = Object.keys(d.mastersOnShift).filter(function(k) { return d.mastersOnShift[k]; }).length;
-            UI.$('mastersCount').textContent = newCount + ' выбрано';
-            Tetradka.markDirty();
-            Tetradka.renderServices(d);  // обновить столбцы услуг
-            Tetradka.renderSalary(d);
-        });
-    });
-},
+            document.querySelectorAll('[data-master]').forEach(function(el) {
+                el.addEventListener('click', function() {
+                    var name = el.dataset.master;
+                    if (d.mastersOnShift[name]) delete d.mastersOnShift[name];
+                    else d.mastersOnShift[name] = true;
+                    el.classList.toggle('on', !!d.mastersOnShift[name]);
+                    var newCount = Object.keys(d.mastersOnShift).filter(function(k) { return d.mastersOnShift[k]; }).length;
+                    UI.$('mastersCount').textContent = newCount + ' выбрано';
+                    Tetradka.markDirty();
+                    Tetradka.renderServices(d);
+                    Tetradka.renderSalary(d);
+                });
+            });
+        },
 
         // ============ УСЛУГИ И % ============
         renderServices: function(d) {
@@ -1817,6 +1860,7 @@ renderMasters: function(d) {
 
             var bodyHtml = '';
             d.services.forEach(function(svc, idx) {
+                if (!svc || !svc.name) return;
                 bodyHtml += '<tr><td>';
                 if (svc.fixed) bodyHtml += '<span style="padding:5px 8px;display:inline-block;color:var(--text-0)">' + svc.name + ' 🔒</span>';
                 else bodyHtml += '<input type="text" value="' + svc.name + '" data-svc-name="' + idx + '">';
@@ -1834,7 +1878,9 @@ renderMasters: function(d) {
 
             document.querySelectorAll('[data-svc-name]').forEach(function(inp) {
                 inp.addEventListener('change', function() {
-                    d.services[Number(inp.dataset.svcName)].name = inp.value.trim() || 'услуга';
+                    var idx = Number(inp.dataset.svcName);
+                    var newName = inp.value.trim() || 'услуга';
+                    d.services[idx].name = newName;
                     Tetradka.markDirty();
                     Tetradka.renderAll();
                 });
@@ -1862,23 +1908,29 @@ renderMasters: function(d) {
         // ============ МАШИНЫ ============
         renderCars: function(d) {
             var html = '';
-            var svcOptions = d.services.map(function(s) { return s.name; });
+            var svcOptions = d.services
+                .filter(function(s) { return s && s.name; })
+                .map(function(s) { return s.name; });
             var paymentCodes = Payments.all();
 
-            d.cars.forEach(function(c, idx) {
+            var total = d.cars.length;
+            var limit = State.carsLimit || 10;
+            var visibleCars = d.cars.slice(0, limit);
+
+            visibleCars.forEach(function(c, idx) {
                 var linked = c.recordKey ? 'linked' : '';
-                var total = c.services.reduce(function(s, x) { return s + (Number(x.amount) || 0); }, 0);
+                var carTotal = c.services.reduce(function(s, x) { return s + (Number(x.amount) || 0); }, 0);
                 var hasRecord = !!c.recordKey;
 
                 html += '<div class="car-row ' + linked + '">';
                 html += '<div class="car-row-head">';
                 html += '<div class="num">#' + (idx + 1) + (hasRecord ? ' 🔗' : '') + '</div>';
                 html += '<input class="car-name" type="text" value="' + c.car + '" data-car="' + c.id + '" placeholder="МАРКА">';
-                html += '<div class="total">' + Utils.fmtMoney(total) + '</div>';
+                html += '<div class="total">' + Utils.fmtMoney(carTotal) + '</div>';
                 if (hasRecord) {
                     html += '<button class="open-record" data-open-car-record="' + c.recordKey + '" title="Открыть запись">👁</button>';
                 } else {
-                    html += '<div style="width:28px"></div>';
+                    html += '<div class="spacer"></div>';
                 }
                 html += '<button class="del" data-car-del="' + c.id + '">✕</button>';
                 html += '</div>';
@@ -1913,8 +1965,27 @@ renderMasters: function(d) {
             });
 
             UI.$('carsList').innerHTML = html || '<div class="cash-empty">Нет машин</div>';
-            UI.$('carsCount').textContent = d.cars.length + ' ' + (d.cars.length === 1 ? 'машина' : 'машин');
+            UI.$('carsCount').textContent = total + ' ' + (total === 1 ? 'машина' : 'машин');
 
+            // Кнопки Показать все / Показать ещё
+            var showMoreBtn = UI.$('showMoreCarsBtn');
+            var toggleBtn = UI.$('toggleCarsLimit');
+
+            if (total > 10) {
+                toggleBtn.style.display = 'inline-flex';
+                toggleBtn.textContent = limit >= total ? 'Свернуть' : 'Показать все';
+            } else {
+                toggleBtn.style.display = 'none';
+            }
+
+            if (limit < total) {
+                showMoreBtn.style.display = 'flex';
+                showMoreBtn.textContent = 'Показать ещё ' + Math.min(10, total - limit) + ' машин';
+            } else {
+                showMoreBtn.style.display = 'none';
+            }
+
+            // Обработчики
             document.querySelectorAll('[data-car]').forEach(function(inp) {
                 inp.addEventListener('change', function() {
                     var car = d.cars.find(function(c) { return c.id === inp.dataset.car; });
@@ -1930,7 +2001,6 @@ renderMasters: function(d) {
                     Tetradka.renderAll();
                 });
             });
-            // 🆕 Открыть запись из машины
             document.querySelectorAll('[data-open-car-record]').forEach(function(btn) {
                 btn.addEventListener('click', function() {
                     var key = btn.dataset.openCarRecord;
@@ -1988,7 +2058,7 @@ renderMasters: function(d) {
             });
         },
 
-        // ============ ИТОГИ ПО ОПЛАТАМ ============
+        // ============ ИТОГИ ============
         renderTotals: function(d) {
             var totals = {};
             var grandTotal = 0;
@@ -2043,6 +2113,7 @@ renderMasters: function(d) {
             activeMasters.forEach(function(m) { masterTotals[m.name] = 0; });
 
             d.services.forEach(function(svc) {
+                if (!svc || !svc.name) return;
                 var sum = serviceSums[svc.name] || 0;
                 bodyHtml += '<tr><td>' + svc.name + ' <span style="color:var(--text-2);font-weight:500;font-size:11px">· ' + Utils.fmtMoney(sum) + '</span></td>';
                 activeMasters.forEach(function(m) {
@@ -2066,26 +2137,21 @@ renderMasters: function(d) {
             UI.$('salaryBody').innerHTML = bodyHtml;
         },
 
-        // ============ АВАНСЫ ============
+        // ============ АВАНСЫ (только наличные) ============
         renderAdvances: function(d) {
             var html = '';
             var total = 0;
             d.advances.forEach(function(a) {
                 total += Number(a.amount) || 0;
-                html += '<div class="cash-list-item">';
+                html += '<div class="cash-list-item adv-item">';
                 html += '<select data-adv-master="' + a.id + '">';
                 d.masters.forEach(function(m) {
                     var sel = a.master === m.name ? 'selected' : '';
                     html += '<option value="' + m.name + '" ' + sel + '>' + m.name + '</option>';
                 });
                 html += '</select>';
-                html += '<input type="number" class="amount" value="' + a.amount + '" min="0" step="100" data-adv-amount="' + a.id + '">';
-                html += '<select data-adv-payment="' + a.id + '">';
-                ['cash', 'card', 'sbp', 'bn'].forEach(function(code) {
-                    var sel = a.payment === code ? 'selected' : '';
-                    html += '<option value="' + code + '" ' + sel + '>' + Payments.label(code) + '</option>';
-                });
-                html += '</select>';
+                html += '<input type="number" class="amount" value="' + a.amount + '" min="0" step="100" data-adv-amount="' + a.id + '" placeholder="Сумма">';
+                html += '<div class="spacer"></div>';
                 html += '<button class="del" data-adv-del="' + a.id + '">✕</button>';
                 html += '</div>';
             });
@@ -2102,13 +2168,13 @@ renderMasters: function(d) {
             document.querySelectorAll('[data-adv-amount]').forEach(function(inp) {
                 inp.addEventListener('input', function() {
                     var a = d.advances.find(function(x) { return x.id === inp.dataset.advAmount; });
-                    if (a) { a.amount = Number(inp.value) || 0; Tetradka.markDirty(); Tetradka.renderAdvances(d); Tetradka.renderCash(d); }
-                });
-            });
-            document.querySelectorAll('[data-adv-payment]').forEach(function(sel) {
-                sel.addEventListener('change', function() {
-                    var a = d.advances.find(function(x) { return x.id === sel.dataset.advPayment; });
-                    if (a) { a.payment = sel.value; Tetradka.markDirty(); Tetradka.renderCash(d); }
+                    if (a) {
+                        a.amount = Number(inp.value) || 0;
+                        a.payment = 'cash';
+                        Tetradka.markDirty();
+                        Tetradka.renderAdvances(d);
+                        Tetradka.renderCash(d);
+                    }
                 });
             });
             document.querySelectorAll('[data-adv-del]').forEach(function(btn) {
@@ -2166,8 +2232,9 @@ renderMasters: function(d) {
                     if (svc.payment === 'cash') incomeCash += Number(svc.amount) || 0;
                 });
             });
+            // 🔑 Все авансы уменьшают кассу
             var advancesCash = d.advances.reduce(function(sum, a) {
-                return sum + (a.payment === 'cash' ? Number(a.amount) || 0 : 0);
+                return sum + (Number(a.amount) || 0);
             }, 0);
             var expensesSum = (d.cash.expenses || []).reduce(function(sum, e) { return sum + (Number(e.amount) || 0); }, 0);
             var total = Number(d.cash.start_cash) + incomeCash - advancesCash - expensesSum;
@@ -2208,7 +2275,12 @@ renderMasters: function(d) {
             UI.$('closeMonthBtn').addEventListener('click', function() {
                 if (!confirm('Закрыть месяц? Остатки перенесутся на следующий месяц.')) return;
                 Api.closeMonth({ year: State.zarpYear, month: State.zarpMonth, branch: State.zarpBranch }).then(function(res) {
-                    if (res && !res.error) { UI.toast('Месяц закрыт', 'success'); Zarp.loadAndRender(true); }
+                    if (res && !res.error) {
+                        UI.toast('Месяц закрыт', 'success');
+                        State.salaryMonthData = null;
+                        State.salaryMonthLoadedKey = null;
+                        Zarp.loadAndRender(true);
+                    }
                     else UI.toast('Ошибка', 'error');
                 });
             });
@@ -2218,12 +2290,16 @@ renderMasters: function(d) {
 
         loadAndRender: function(force) {
             UI.$('monthLabel').textContent = Zarp.monthLabel(State.zarpYear, State.zarpMonth);
-            if (!force && State.salaryMonthData) {
+            var currentKey = State.zarpYear + '_' + State.zarpMonth;
+
+            if (!force && State.salaryMonthData && State.salaryMonthLoadedKey === currentKey) {
                 Zarp.render();
                 return;
             }
+
             Api.getSalaryMonth(State.zarpYear, State.zarpMonth).then(function(res) {
                 State.salaryMonthData = res || { days: [], advances: [], marks: [], masters: [] };
+                State.salaryMonthLoadedKey = currentKey;
                 Zarp.render();
             });
         },
@@ -2310,9 +2386,14 @@ renderMasters: function(d) {
 
             var totals = { cassa: 0, sbp: 0, bn: 0, card: 0, cash: 0, almir: 0, inv: 0, vyruch: 0 };
             days.forEach(function(d) {
-                totals.cassa += d.cassa || 0; totals.sbp += d.sbp || 0; totals.bn += d.bn || 0;
-                totals.card += d.card || 0; totals.cash += d.cash || 0; totals.almir += d.almir || 0;
-                totals.inv += d.inv || 0; totals.vyruch += d.vyruch || 0;
+                totals.cassa += d.cassa || 0;
+                totals.sbp += d.sbp || 0;
+                totals.bn += d.bn || 0;
+                totals.card += d.card || 0;
+                totals.cash += d.cash || 0;
+                totals.almir += d.almir || 0;
+                totals.inv += d.inv || 0;
+                totals.vyruch += d.vyruch || 0;
             });
             bodyHtml += '<tr class="row-total"><td>ИТОГО</td>';
             bodyHtml += '<td>' + Zarp.num(totals.cassa) + '</td><td>' + Zarp.num(totals.sbp) + '</td>';
@@ -2435,6 +2516,8 @@ renderMasters: function(d) {
                 btn.addEventListener('click', function() {
                     Api.deleteMark(btn.dataset.markDel).then(function() {
                         UI.toast('Пометка удалена', 'success');
+                        State.salaryMonthData = null;
+                        State.salaryMonthLoadedKey = null;
                         Zarp.loadAndRender(true);
                     });
                 });
@@ -2485,6 +2568,8 @@ renderMasters: function(d) {
                     if (res && !res.error) {
                         UI.toast('Пометка добавлена', 'success');
                         Zarp.closeModal();
+                        State.salaryMonthData = null;
+                        State.salaryMonthLoadedKey = null;
                         Zarp.loadAndRender(true);
                     } else UI.toast('Ошибка', 'error');
                 });
@@ -2506,23 +2591,19 @@ renderMasters: function(d) {
         saveToCache: function() {
             LocalCache.save({
                 records: State.occupiedSlots,
-                tetradka: State.tetradka[State.tetradkaBranch],
                 prices: State.prices,
-                masters: State.mastersList,
-                salaryMonth: State.salaryMonthData
+                masters: State.mastersList
             });
         },
 
         applyBootstrap: function(data) {
             if (!data) return;
 
-            // Записи CRM
             if (data.records && !data.records.error) {
                 State.occupiedSlots = Utils.normalizeAllKeys(data.records);
                 App.rebuildClients();
             }
 
-            // Прайс
             if (data.prices && !data.prices.error) {
                 State.prices = {
                     ryabinina: data.prices.ryabinina || null,
@@ -2531,24 +2612,8 @@ renderMasters: function(d) {
                 State.pricesLoaded = true;
             }
 
-            // Мастера
             if (Array.isArray(data.masters)) {
                 State.mastersList = data.masters;
-            }
-
-            // Тетрадка
-            if (data.tetradkaDay && !data.tetradkaDay.error) {
-                var branch = data.tetradkaDay.branch || State.tetradkaBranch;
-                var date = data.tetradkaDay.date || State.tetradkaDate;
-                Tetradka.applyServerData(branch, date, data.tetradkaDay);
-                State.tetradkaLoaded[branch] = true;
-                Tetradka._lastSavedAt = new Date();
-                Tetradka._hasChanges = false;
-            }
-
-            // Зарплаты
-            if (data.salaryMonth && !data.salaryMonth.error) {
-                State.salaryMonthData = data.salaryMonth;
             }
         },
 
@@ -2556,31 +2621,26 @@ renderMasters: function(d) {
             var date = State.tetradkaDate || new Date().toISOString().slice(0, 10);
             State.tetradkaDate = date;
 
-            // 🎯 Мгновенно показываем кэш
             var cached = LocalCache.load();
             if (cached && cached.data) {
                 App.applyBootstrap({
                     records: cached.data.records,
-                    tetradkaDay: cached.data.tetradka,
                     prices: cached.data.prices,
-                    masters: cached.data.masters,
-                    salaryMonth: cached.data.salaryMonth
+                    masters: cached.data.masters
                 });
-                State.isFromCache = true;
                 App.renderAll();
             } else {
                 UI.$('slotsContainer').innerHTML = UI.skeletonSlots(6);
             }
 
-            // 🚀 Загружаем свежие данные
-            return Api.getBootstrap(date, State.zarpYear, State.zarpMonth, State.currentBranch).then(function(data) {
+            return Api.getBootstrap().then(function(data) {
                 if (data && !data.error) {
-                    State.isFromCache = false;
                     App.applyBootstrap(data);
                     App.renderAll();
                     App.saveToCache();
+                    // 🔑 Перерисовываем услуги в Новой записи (после загрузки)
+                    NewRecord.renderServicesGrid();
                 } else if (!cached) {
-                    // Fallback
                     return App.fallbackLoad();
                 }
             }).catch(function(e) {
@@ -2599,6 +2659,7 @@ renderMasters: function(d) {
             }).then(function(masters) {
                 if (Array.isArray(masters)) State.mastersList = masters;
                 App.renderAll();
+                NewRecord.renderServicesGrid();
             });
         },
 
@@ -2765,7 +2826,9 @@ renderMasters: function(d) {
             UI.$('mobileRefreshBtn').addEventListener('click', function() {
                 LocalCache.clear();
                 State.salaryMonthData = null;
+                State.salaryMonthLoadedKey = null;
                 State.pricesLoaded = false;
+                State.tetradkaLoaded = { ryabinina: false, amundsena: false };
                 App.bootstrap();
                 UI.toast('Обновлено', 'success', 1500);
             });
@@ -2789,6 +2852,19 @@ renderMasters: function(d) {
 
                     if (window.innerWidth <= 900) App.toggleSidebar(false);
                 });
+
+                // 🔑 Прелоад при hover / touch
+                var preloadPage = function() {
+                    var page = item.dataset.page;
+                    if (page === 'tetradka' && !State.tetradkaLoaded[State.tetradkaBranch]) {
+                        Tetradka.loadDay();
+                    }
+                    if (page === 'zarplaty' && (!State.salaryMonthData || State.salaryMonthLoadedKey !== (State.zarpYear + '_' + State.zarpMonth))) {
+                        Zarp.loadAndRender();
+                    }
+                };
+                item.addEventListener('mouseenter', preloadPage, { once: true });
+                item.addEventListener('touchstart', preloadPage, { once: true, passive: true });
             });
 
             document.querySelectorAll('.price-branch').forEach(function(btn) {
@@ -2841,7 +2917,7 @@ renderMasters: function(d) {
 
             document.addEventListener('visibilitychange', function() {
                 if (!document.hidden && !State.isUpdating) {
-                    if (Date.now() - State.lastBootstrapAt > 60000) App.bootstrap();
+                    if (Date.now() - State.lastBootstrapAt > 90000) App.bootstrap();
                 }
             });
 
@@ -2870,10 +2946,9 @@ renderMasters: function(d) {
             flatpickr.localize(flatpickr.l10ns.ru);
             State.tetradkaDate = new Date().toISOString().slice(0, 10);
 
-            // 🚀 Bootstrap — один запрос
+            // 🚀 Bootstrap — один запрос, без тяжёлых данных
             App.bootstrap();
 
-            // Фон-обновление каждые 30 сек
             setInterval(function() {
                 if (!State.isUpdating && !document.hidden && !Tetradka._hasChanges) {
                     State.isUpdating = true;
