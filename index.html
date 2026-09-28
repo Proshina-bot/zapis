@@ -147,8 +147,8 @@
                     <div class="form-group">
                         <label>Репутация клиента</label>
                         <div class="rating-block">
-                            <button class="rating-btn good" id="ratingGood">👍</button>
-                            <button class="rating-btn bad" id="ratingBad">👎 Проблемный</button>
+                            <button class="rating-btn good" id="ratingGood" title="Хороший">👍</button>
+                            <button class="rating-btn bad" id="ratingBad" title="Проблемный">👎</button>
                         </div>
                     </div>
 
@@ -228,11 +228,15 @@
                 </div>
             </div>
 
+            <!-- ВЕРХНИЙ БЛОК: ЗАПИСИ + ПОДКАЧКА -->
             <div class="top-split">
                 <div class="card">
                     <div class="card-title">
                         <span>📌 Записи на сегодня</span>
-                        <span class="badge accent" id="recordsCount">0 из 0</span>
+                        <div class="card-title-actions">
+                            <span class="badge accent" id="recordsCount">0 из 0</span>
+                            <button class="btn xs" id="toggleProcessedRecords" title="Скрыть обработанные">👁 Скрыть обработанные</button>
+                        </div>
                     </div>
                     <div class="records-compact" id="recordsList"></div>
                 </div>
@@ -246,6 +250,7 @@
                 </div>
             </div>
 
+            <!-- МАСТЕРА НА СМЕНЕ -->
             <div class="card">
                 <div class="card-title">
                     <span>👥 Мастера на смене</span>
@@ -254,6 +259,7 @@
                 <div class="masters-row" id="mastersRow"></div>
             </div>
 
+            <!-- УСЛУГИ И % -->
             <div class="card">
                 <div class="card-title">
                     <span>📋 Услуги и проценты (% от суммы услуги)</span>
@@ -267,22 +273,31 @@
                 </div>
             </div>
 
+            <!-- МАШИНЫ ЗА ДЕНЬ -->
             <div class="card">
                 <div class="card-title">
                     <span>🚗 Машины за день</span>
-                    <span class="badge" id="carsCount">0 машин</span>
+                    <div class="card-title-actions">
+                        <span class="badge" id="carsCount">0 машин</span>
+                        <button class="btn xs" id="toggleCarsLimit" style="display:none">Показать все</button>
+                    </div>
                 </div>
                 <div class="cars-list" id="carsList"></div>
                 <button class="add-car-btn" id="addCarBtn">
                     <span>+</span> Добавить машину
                 </button>
+                <button class="add-car-btn show-more-cars" id="showMoreCarsBtn" style="display:none">
+                    Показать ещё 10 машин
+                </button>
             </div>
 
+            <!-- ИТОГИ ПО ОПЛАТАМ -->
             <div class="card">
                 <div class="card-title"><span>💵 Итоги по способам оплаты</span></div>
                 <div class="totals-grid" id="paymentsTotals"></div>
             </div>
 
+            <!-- ЗАРПЛАТА МАСТЕРОВ -->
             <div class="card">
                 <div class="card-title"><span>💰 Зарплата мастеров</span></div>
                 <div class="tbl-wrap">
@@ -293,6 +308,7 @@
                 </div>
             </div>
 
+            <!-- КАССА -->
             <div class="card">
                 <div class="card-title"><span>🏦 Касса</span></div>
                 <div class="cash-block">
@@ -325,6 +341,7 @@
                         </div>
                     </div>
 
+                    <!-- АВАНСЫ -->
                     <div class="cash-subblock">
                         <div class="cash-subblock-head">
                             <div class="cash-subblock-title">💸 Авансы мастерам</div>
@@ -334,6 +351,7 @@
                         <button class="cash-add-btn" id="addAdvanceBtn">+ Добавить аванс</button>
                     </div>
 
+                    <!-- РАСХОДЫ -->
                     <div class="cash-subblock">
                         <div class="cash-subblock-head">
                             <div class="cash-subblock-title">📝 Расходы</div>
