@@ -738,7 +738,7 @@ body {
 }
 .car-row-head {
     display: grid;
-    grid-template-columns: 28px 1fr auto 28px;
+    grid-template-columns: 28px 1fr auto 28px 28px;
     gap: 8px;
     align-items: center;
 }
@@ -2337,7 +2337,9 @@ body {
 }
 @media (max-width: 520px) {
     .cash-row-top { grid-template-columns: 1fr; }
-    .car-row-head { grid-template-columns: 24px 1fr auto 28px 28px; gap: 5px; }
+    .car-row-head { grid-template-columns: 22px 1fr auto 24px 24px; gap: 4px; }
+    .car-row-head .del,
+    .car-row-head .open-record { width: 24px; height: 24px; }
     .car-service-inline { grid-template-columns: minmax(70px,1fr) 55px 65px 20px; gap: 2px; }
     .cash-list-item { grid-template-columns: 1fr 80px 28px; gap: 3px; }
 }
