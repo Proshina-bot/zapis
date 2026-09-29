@@ -21,7 +21,7 @@
         // 🔑 READ — чтение
         APPS_SCRIPT_URL_READ: 'https://script.google.com/macros/s/AKfycbw1_34-xP15MuenSVFVBinIZ7al95PlwvAwHKVyP1QaOP4l1G4Iq-orBDTjAAqPn9_KqQ/exec',
         // 🔑 WRITE — запись
-        APPS_SCRIPT_URL_WRITE: 'https://script.google.com/macros/s/AKfycbwdaOwN_TsNXX5binY31wIZAcYijPw30n7kt7p5Hcb8r_9pU4DaMHLDwDKz0MnuvBpUCg/exec',
+        APPS_SCRIPT_URL_WRITE: 'https://script.google.com/macros/s/AKfycbzetArbaMT_outnfjjO6-GuU2EDOknZPj7l4U2gcyWvnvtYa4Q-8kxmanxE7F_VbYaivg/exec',
 
         CARS: ['1', '2', '3'],
         SIZES: ['R13','R14','R15','R16','R17','R18','R19','R20','R21','R22','R23'],
