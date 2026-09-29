@@ -413,18 +413,27 @@
                 setTimeout(function() { el.remove(); }, 300);
             }, duration);
         },
-        setLoading: function(btnId, loading, textId, loadingText) {
-            var btn = UI.$(btnId);
-            if (!btn) return;
-            btn.disabled = loading;
-            var textEl = textId ? UI.$(textId) : btn;
-            if (loading) {
-                if (!btn.dataset.originalText) btn.dataset.originalText = textEl.textContent;
-                textEl.innerHTML = '<span class="spinner"></span> ' + (loadingText || 'Загрузка...');
-            } else {
-                if (btn.dataset.originalText) textEl.textContent = btn.dataset.originalText;
-            }
-        },
+setLoading: function(btnId, loading, textId, loadingText) {
+    var btn = UI.$(btnId);
+    if (!btn) return;
+    btn.disabled = loading;
+
+    // 🔑 Берём span, если он есть; иначе — саму кнопку
+    var textEl = textId ? UI.$(textId) : null;
+    if (!textEl || !textEl.parentNode) textEl = btn;
+
+    if (loading) {
+        if (textEl._originalText === undefined) {
+            textEl._originalText = textEl.textContent || '';
+        }
+        textEl.innerHTML = '<span class="spinner"></span> ' + (loadingText || 'Загрузка...');
+    } else {
+        if (textEl._originalText !== undefined) {
+            textEl.textContent = textEl._originalText;
+            delete textEl._originalText;
+        }
+    }
+},
         skeletonSlots: function(count) {
             count = count || 6;
             var html = '';
