@@ -70,15 +70,19 @@
                         <button class="branch-btn-lg" data-branch="amundsena">🏭 Амундсена</button>
                     </div>
                 </div>
-                <div class="date-picker-center">
-                    <span>📅</span>
-                    <input type="text" id="datePicker" class="date-input-center" placeholder="Дата" readonly>
+                <div class="date-picker-stack">
+                    <div class="date-picker-center">
+                        <span>📅</span>
+                        <input type="text" id="datePicker" class="date-input-center" placeholder="Дата" readonly>
+                    </div>
+                    <button class="btn xs today-btn" id="todayBtn" title="Перейти к сегодняшнему дню">Сегодня</button>
                 </div>
                 <div class="page-header-right">
                     <div class="load-indicator" id="loadIndicator">
                         <span class="load-dot"></span>
                         <span id="loadText">—</span>
                     </div>
+                    <button class="btn" id="refreshNewRecordBtn" title="Обновить данные">↻ Обновить</button>
                 </div>
             </div>
 
@@ -147,7 +151,7 @@
                     </div>
 
                     <button class="submit-btn" id="submitBtn" disabled>
-                    <span id="submitText">✚ Записать клиента</span>
+                        <span id="submitText">✚ Записать клиента</span>
                     </button>
                 </div>
             </div>
@@ -193,6 +197,7 @@
                         <span class="save-status-dot" id="saveStatusDot"></span>
                         <span id="saveStatusText">—</span>
                     </div>
+                    <button class="btn" id="refreshTetradkaBtn" title="Обновить данные">↻ Обновить</button>
                     <button class="btn warning" id="saveTetradkaBtn">🔒 Закрыть смену</button>
                 </div>
             </div>
@@ -314,7 +319,10 @@
                         <button id="nextMonth">›</button>
                     </div>
                 </div>
-                <div class="page-header-actions"><button class="btn warning" id="closeMonthBtn">🔒 Закрыть месяц</button></div>
+                <div class="page-header-actions">
+                    <button class="btn" id="refreshZarpBtn" title="Обновить данные">↻ Обновить</button>
+                    <button class="btn warning" id="closeMonthBtn">🔒 Закрыть месяц</button>
+                </div>
             </div>
 
             <div class="card">
