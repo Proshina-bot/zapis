@@ -1,13 +1,11 @@
 /* ============================================================
- * PRO-шина · CRM — app.js v3.2
+ * PRO-шина · CRM — app.js v3.3
  *
- * ИСПРАВЛЕНИЯ ОТНОСИТЕЛЬНО v3.1:
- *  - Убрана verifyRecordSaved (она тормозила Apps Script)
- *  - submitInFlight снимается ВСЕГДА (не зависает)
- *  - createRecord timeout 20с (было 30с) — быстрее реакция
- *  - bootstrap реже: 120с (было 60с)
- *  - bootstrap пропускается при активной optimistic-записи
- *  - При timeout — один отложенный bootstrap через 15с (не 4 подряд)
+ * НОВОЕ ОТНОСИТЕЛЬНО v3.2:
+ *  - Кнопки «↻ Обновить» на вкладках Новая запись / Тетрадка / Зарплаты
+ *  - Кнопка «Сегодня» под календарём в Новой записи
+ *  - Placeholder "0" вместо value="0" в услугах/суммах (не надо стирать)
+ *  - setLoading безопасный (fallback на btn, если textId отсутствует)
  * ============================================================ */
 
 (function() {
@@ -112,9 +110,6 @@
         }
     };
 
-    // ============================================================
-    // 🗄 STATE
-    // ============================================================
     var State = {
         occupiedSlots: {},
         clientsDatabase: {},
@@ -153,9 +148,6 @@
         bootstrapInFlight: null
     };
 
-    // ============================================================
-    // 🌐 API
-    // ============================================================
     var Api = {
         _fetchWithTimeout: function(url, timeout) {
             return new Promise(function(resolve, reject) {
@@ -200,7 +192,6 @@
             return State.bootstrapInFlight;
         },
         getAll: function() { return Api._fetch({ action: 'getAll' }); },
-        // createRecord/delete/move/saveExtra — без retry (устраняет дубли при timeout)
         createRecord: function(data) { return Api._fetch(Object.assign({ action: 'new' }, data), 0, 20000); },
         deleteRecord: function(slotKey) { return Api._fetch({ action: 'delete', slotKey: slotKey }, 0, 20000); },
         moveRecord: function(oldKey, newKey, data) {
@@ -235,9 +226,6 @@
         }
     };
 
-    // ============================================================
-    // 🔧 UTILS
-    // ============================================================
     var Utils = {
         normalizeSlotKey: function(key) {
             if (!key) return '';
@@ -257,7 +245,7 @@
             return out;
         },
 
-        // 🔑 formatPhone без зеркалирования
+        // 🔑 Телефон без зеркалирования
         formatPhone: function(value, cursorPos) {
             var digits = value.replace(/\D/g, '');
             if (digits.length > 0 && (digits[0] === '7' || digits[0] === '8')) {
@@ -392,12 +380,15 @@
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#39;');
+        },
+        // 🔑 Число → строка для input: 0 → '', иначе как есть
+        numToInput: function(n) {
+            var num = Number(n);
+            if (isNaN(num) || num === 0) return '';
+            return String(num);
         }
     };
 
-    // ============================================================
-    // 🎨 UI
-    // ============================================================
     var UI = {
         $: function(id) { return document.getElementById(id); },
         toast: function(message, type, duration) {
@@ -413,27 +404,29 @@
                 setTimeout(function() { el.remove(); }, 300);
             }, duration);
         },
-setLoading: function(btnId, loading, textId, loadingText) {
-    var btn = UI.$(btnId);
-    if (!btn) return;
-    btn.disabled = loading;
 
-    // 🔑 Берём span, если он есть; иначе — саму кнопку
-    var textEl = textId ? UI.$(textId) : null;
-    if (!textEl || !textEl.parentNode) textEl = btn;
+        // 🔑 Безопасный setLoading — не падает, если textId отсутствует
+        setLoading: function(btnId, loading, textId, loadingText) {
+            var btn = UI.$(btnId);
+            if (!btn) return;
+            btn.disabled = loading;
 
-    if (loading) {
-        if (textEl._originalText === undefined) {
-            textEl._originalText = textEl.textContent || '';
-        }
-        textEl.innerHTML = '<span class="spinner"></span> ' + (loadingText || 'Загрузка...');
-    } else {
-        if (textEl._originalText !== undefined) {
-            textEl.textContent = textEl._originalText;
-            delete textEl._originalText;
-        }
-    }
-},
+            var textEl = textId ? UI.$(textId) : null;
+            if (!textEl || !textEl.parentNode) textEl = btn;
+
+            if (loading) {
+                if (textEl._originalText === undefined) {
+                    textEl._originalText = textEl.textContent || '';
+                }
+                textEl.innerHTML = '<span class="spinner"></span> ' + (loadingText || 'Загрузка...');
+            } else {
+                if (textEl._originalText !== undefined) {
+                    textEl.textContent = textEl._originalText;
+                    delete textEl._originalText;
+                }
+            }
+        },
+
         skeletonSlots: function(count) {
             count = count || 6;
             var html = '';
@@ -488,6 +481,27 @@ setLoading: function(btnId, loading, textId, loadingText) {
                     NewRecord.renderSlots();
                 }
             });
+
+            // 🔑 Кнопка «Сегодня»
+            var todayBtn = UI.$('todayBtn');
+            if (todayBtn) {
+                todayBtn.addEventListener('click', function() {
+                    var now = new Date();
+                    var today = now.getFullYear() + '-' +
+                        String(now.getMonth() + 1).padStart(2, '0') + '-' +
+                        String(now.getDate()).padStart(2, '0');
+                    var datePicker = UI.$('datePicker');
+                    // flatpickr setDate сам обновит value и вызовет onChange
+                    if (datePicker._flatpickr) {
+                        datePicker._flatpickr.setDate(today, true);
+                    } else {
+                        datePicker.value = today;
+                        State.currentSelection = { date: null, time: null, car: null, slotKey: null };
+                        UI.$('slotInfoBanner').classList.remove('show');
+                        NewRecord.renderSlots();
+                    }
+                });
+            }
 
             document.querySelectorAll('#newRecordBranchSelector .branch-btn-lg').forEach(function(btn) {
                 btn.addEventListener('click', function() {
@@ -725,7 +739,6 @@ setLoading: function(btnId, loading, textId, loadingText) {
             submitEl.disabled = !ready;
         },
 
-        // 🔑 ГЛАВНОЕ ИСПРАВЛЕНИЕ — submitInFlight всегда снимается
         submit: function() {
             var phone = UI.$('phone').value.trim();
             if (phone.replace(/\D/g, '').length < 11) { UI.toast('Введите корректный телефон', 'error'); return; }
@@ -762,7 +775,6 @@ setLoading: function(btnId, loading, textId, loadingText) {
                 return;
             }
 
-            // Чистим зависшие optimistic
             var now = Date.now();
             Object.keys(State.occupiedSlots).forEach(function(k) {
                 var rec = State.occupiedSlots[k];
@@ -771,14 +783,11 @@ setLoading: function(btnId, loading, textId, loadingText) {
                 }
             });
 
-            // 🔑 Флаг выставляем
             State.submitInFlight[slotKey] = true;
-
             var submitBtn = UI.$('submitBtn');
             submitBtn.disabled = true;
             UI.setLoading('submitBtn', true, 'submitText', 'Запись...');
 
-            // 🔑 Оптимистичный UI
             State.occupiedSlots[slotKey] = {
                 services: State.selectedServices.slice(),
                 size: payload.size,
@@ -802,15 +811,11 @@ setLoading: function(btnId, loading, textId, loadingText) {
             submitBtn.disabled = false;
             UI.setLoading('submitBtn', false);
 
-            // 🔑 Отправка
             Api.createRecord(payload).then(function(res) {
-                // 🔑 ГЛАВНОЕ: снимаем флаг ВСЕГДА
                 delete State.submitInFlight[slotKey];
 
-                // Случай A: timeout — НЕ откатываем, ждём bootstrap
                 if (res === null) {
                     UI.toast('Сохранение в процессе...', 'info', 2500);
-                    // Один отложенный bootstrap через 15 сек
                     setTimeout(function() {
                         var rec = State.occupiedSlots[slotKey];
                         if (rec && rec._optimistic) {
@@ -820,7 +825,6 @@ setLoading: function(btnId, loading, textId, loadingText) {
                     return;
                 }
 
-                // Случай B: серверная ошибка (слот занят, невалид)
                 if (res.error) {
                     delete State.occupiedSlots[slotKey];
                     App.removeClientByKey(slotKey);
@@ -834,7 +838,6 @@ setLoading: function(btnId, loading, textId, loadingText) {
                     return;
                 }
 
-                // Случай C: успех
                 if (res.ok && res.slotKey && res.record) {
                     if (res.slotKey !== slotKey) {
                         delete State.occupiedSlots[slotKey];
@@ -855,7 +858,6 @@ setLoading: function(btnId, loading, textId, loadingText) {
                     App.bootstrap();
                 }
             }).catch(function() {
-                // 🔑 В catch — тоже снимаем флаг
                 delete State.submitInFlight[slotKey];
                 UI.toast('Сохранение в процессе...', 'info', 2500);
                 setTimeout(function() {
@@ -1509,6 +1511,7 @@ setLoading: function(btnId, loading, textId, loadingText) {
         _lastSavedAt: null,
         _isSaving: false,
         _refreshingRecords: false,
+        _refreshingFull: false,
 
         init: function() {
             flatpickr(UI.$('tetradkaDatePicker'), {
@@ -1553,52 +1556,12 @@ setLoading: function(btnId, loading, textId, loadingText) {
             });
 
             UI.$('refreshRecordsBtn').addEventListener('click', function() {
-                if (Tetradka._refreshingRecords) return;
-                var d = Tetradka.getCurrent();
-                if (!d) return;
-                Tetradka._refreshingRecords = true;
-                var btn = this;
-                btn.classList.add('loading');
-                btn.textContent = '⏳';
+                Tetradka.refreshRecordsOnly(this);
+            });
 
-                Api.getSalaryDay(d.date, d.branch).then(function(res) {
-                    if (res && !res.error) {
-                        var savedCars = d.cars;
-                        var savedAdvances = d.advances;
-                        var savedCash = d.cash;
-                        var savedMastersOnShift = d.mastersOnShift;
-                        var savedServices = d.services;
-
-                        Tetradka.applyServerData(d.branch, d.date, res);
-
-                        var newD = State.tetradka[d.branch];
-                        if (newD) {
-                            newD.cars = savedCars;
-                            newD.advances = savedAdvances;
-                            newD.cash = savedCash;
-                            newD.mastersOnShift = savedMastersOnShift;
-                            newD.services = savedServices;
-                            newD.records = Tetradka.getRecordsForDate(d.date, d.branch);
-                            var freshCars = (res.cars || []);
-                            newD.records.forEach(function(rec) {
-                                var linked = freshCars.find(function(c) { return c.recordKey === rec.key; });
-                                if (linked && linked.recordStatus) rec.status = linked.recordStatus;
-                            });
-                        }
-                        Tetradka.renderAll();
-                        UI.toast('Записи обновлены', 'success', 1500);
-                    } else {
-                        UI.toast('Не удалось обновить', 'error');
-                    }
-                    Tetradka._refreshingRecords = false;
-                    btn.classList.remove('loading');
-                    btn.textContent = '↻';
-                }).catch(function() {
-                    Tetradka._refreshingRecords = false;
-                    btn.classList.remove('loading');
-                    btn.textContent = '↻';
-                    UI.toast('Ошибка обновления', 'error');
-                });
+            // 🔑 Кнопка «↻ Обновить» в шапке — полная перезагрузка
+            UI.$('refreshTetradkaBtn').addEventListener('click', function() {
+                Tetradka.fullRefresh(this);
             });
 
             UI.$('applyHideCarsBtn').addEventListener('click', function() {
@@ -1702,6 +1665,105 @@ setLoading: function(btnId, loading, textId, loadingText) {
             });
 
             setInterval(function() { Tetradka.updateSaveStatus(); }, 10000);
+        },
+
+        // 🔑 Обновление только записей (лёгкое)
+        refreshRecordsOnly: function(btn) {
+            if (Tetradka._refreshingRecords) return;
+            var d = Tetradka.getCurrent();
+            if (!d) return;
+            Tetradka._refreshingRecords = true;
+            var originalText = btn.textContent;
+            btn.textContent = '⏳';
+            btn.disabled = true;
+
+            Api.getSalaryDay(d.date, d.branch).then(function(res) {
+                if (res && !res.error) {
+                    var savedCars = d.cars;
+                    var savedAdvances = d.advances;
+                    var savedCash = d.cash;
+                    var savedMastersOnShift = d.mastersOnShift;
+                    var savedServices = d.services;
+
+                    Tetradka.applyServerData(d.branch, d.date, res);
+
+                    var newD = State.tetradka[d.branch];
+                    if (newD) {
+                        newD.cars = savedCars;
+                        newD.advances = savedAdvances;
+                        newD.cash = savedCash;
+                        newD.mastersOnShift = savedMastersOnShift;
+                        newD.services = savedServices;
+                        newD.records = Tetradka.getRecordsForDate(d.date, d.branch);
+                        var freshCars = (res.cars || []);
+                        newD.records.forEach(function(rec) {
+                            var linked = freshCars.find(function(c) { return c.recordKey === rec.key; });
+                            if (linked && linked.recordStatus) rec.status = linked.recordStatus;
+                        });
+                    }
+                    Tetradka.renderAll();
+                    UI.toast('Записи обновлены', 'success', 1500);
+                } else {
+                    UI.toast('Не удалось обновить', 'error');
+                }
+                Tetradka._refreshingRecords = false;
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }).catch(function() {
+                Tetradka._refreshingRecords = false;
+                btn.textContent = originalText;
+                btn.disabled = false;
+                UI.toast('Ошибка обновления', 'error');
+            });
+        },
+
+        // 🔑 Полная перезагрузка текущего дня
+        fullRefresh: function(btn) {
+            if (Tetradka._refreshingFull) return;
+            Tetradka._refreshingFull = true;
+            var originalText = btn.textContent;
+            btn.textContent = '⏳';
+            btn.disabled = true;
+
+            var d = Tetradka.getCurrent();
+            if (!d) {
+                Tetradka._refreshingFull = false;
+                btn.textContent = originalText;
+                btn.disabled = false;
+                return;
+            }
+
+            // Сохраняем несохранённое перед обновлением
+            var doLoad = function() {
+                State.tetradkaLoaded[State.tetradkaBranch] = false;
+                Api.getSalaryDay(d.date, d.branch).then(function(res) {
+                    if (res && !res.error) {
+                        Tetradka.applyServerData(d.branch, d.date, res);
+                        State.tetradkaLoaded[d.branch] = true;
+                        Tetradka._lastSavedAt = new Date();
+                        Tetradka._hasChanges = false;
+                        Tetradka.updateSaveStatus('saved');
+                        Tetradka.renderAll();
+                        UI.toast('Данные обновлены', 'success', 1500);
+                    } else {
+                        UI.toast('Не удалось обновить', 'error');
+                    }
+                    Tetradka._refreshingFull = false;
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                }).catch(function() {
+                    Tetradka._refreshingFull = false;
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                    UI.toast('Ошибка обновления', 'error');
+                });
+            };
+
+            if (Tetradka._hasChanges) {
+                Tetradka.autoSave().then(doLoad);
+            } else {
+                doLoad();
+            }
         },
 
         getCurrent: function() { return State.tetradka[State.tetradkaBranch]; },
@@ -2072,7 +2134,9 @@ setLoading: function(btnId, loading, textId, loadingText) {
             ['bn', 'cash', 'card', 'sbp'].forEach(function(code) {
                 var val = d.pump[code] || 0;
                 total += val;
-                html += '<div class="pump-row"><div class="label">' + Payments.label(code) + '</div><input type="number" value="' + val + '" min="0" step="25" data-pump="' + code + '"></div>';
+                // 🔑 placeholder вместо value, если 0
+                html += '<div class="pump-row"><div class="label">' + Payments.label(code) + '</div>' +
+                        '<input type="number" value="' + Utils.numToInput(val) + '" min="0" step="25" placeholder="0" data-pump="' + code + '"></div>';
             });
             html += '<div class="pump-row total"><div class="label">ИТОГО</div><div style="text-align:right;font-weight:800;color:var(--accent)" id="pumpTotalInline">' + Utils.fmtMoney(total) + '</div></div>';
             UI.$('pumpTable').innerHTML = html;
@@ -2139,6 +2203,7 @@ setLoading: function(btnId, loading, textId, loadingText) {
                 activeMasters.forEach(function(m) {
                     var val = svc.percents[m.name];
                     var cls = val !== undefined ? 'on' : '';
+                    // 🔑 placeholder "—" для пустых значений
                     bodyHtml += '<td class="pct-cell"><input type="number" step="0.1" min="0" max="100" value="' + (val !== undefined ? val : '') + '" class="' + cls + '" data-svc-pct="' + idx + '" data-master-name="' + Utils.escapeHtml(m.name) + '" placeholder="—"></td>';
                 });
                 bodyHtml += '<td>';
@@ -2214,7 +2279,8 @@ setLoading: function(btnId, loading, textId, loadingText) {
                         html += '<option value="' + Utils.escapeHtml(name) + '" ' + sel + '>' + Utils.escapeHtml(name) + '</option>';
                     });
                     html += '</select>';
-                    html += '<input type="number" value="' + (svc.amount || 0) + '" min="0" step="10" data-car-svc-amount="' + c.id + '" data-car-svc-idx="' + sidx + '" placeholder="0">';
+                    // 🔑 placeholder "0" вместо value, если 0
+                    html += '<input type="number" value="' + Utils.numToInput(svc.amount) + '" min="0" step="10" data-car-svc-amount="' + c.id + '" data-car-svc-idx="' + sidx + '" placeholder="0">';
                     html += '<select class="payment-select ' + payCls + '" data-car-svc-payment="' + c.id + '" data-car-svc-idx="' + sidx + '">';
                     html += '<option value="">—</option>';
                     paymentCodes.forEach(function(code) {
@@ -2422,7 +2488,8 @@ setLoading: function(btnId, loading, textId, loadingText) {
                     html += '<option value="' + Utils.escapeHtml(m.name) + '" ' + sel + '>' + Utils.escapeHtml(m.name) + '</option>';
                 });
                 html += '</select>';
-                html += '<input type="number" class="amount" value="' + a.amount + '" min="0" step="100" data-adv-amount="' + a.id + '" placeholder="Сумма">';
+                // 🔑 placeholder "0" вместо value, если 0
+                html += '<input type="number" class="amount" value="' + Utils.numToInput(a.amount) + '" min="0" step="100" data-adv-amount="' + a.id + '" placeholder="0">';
                 html += '<button class="del" data-adv-del="' + a.id + '">✕</button>';
                 html += '</div>';
             });
@@ -2469,7 +2536,8 @@ setLoading: function(btnId, loading, textId, loadingText) {
                 total += Number(e.amount) || 0;
                 html += '<div class="cash-list-item">';
                 html += '<input type="text" value="' + Utils.escapeHtml(e.description || '') + '" placeholder="на что" data-exp-desc="' + e.id + '">';
-                html += '<input type="number" class="amount" value="' + (e.amount || 0) + '" min="0" step="100" data-exp-amount="' + e.id + '">';
+                // 🔑 placeholder "0" вместо value, если 0
+                html += '<input type="number" class="amount" value="' + Utils.numToInput(e.amount) + '" min="0" step="100" data-exp-amount="' + e.id + '" placeholder="0">';
                 html += '<button class="del" data-exp-del="' + e.id + '">✕</button>';
                 html += '</div>';
             });
@@ -2533,6 +2601,8 @@ setLoading: function(btnId, loading, textId, loadingText) {
     // 💰 ЗАРПЛАТЫ
     // ============================================================
     var Zarp = {
+        _refreshing: false,
+
         init: function() {
             document.querySelectorAll('.zarp-branch').forEach(function(btn) {
                 btn.addEventListener('click', function() {
@@ -2565,6 +2635,47 @@ setLoading: function(btnId, loading, textId, loadingText) {
                 });
             });
             UI.$('addMarkBtn').addEventListener('click', Zarp.openMarkModal);
+
+            // 🔑 Кнопка «↻ Обновить» в шапке
+            UI.$('refreshZarpBtn').addEventListener('click', function() {
+                Zarp.fullRefresh(this);
+            });
+        },
+
+        // 🔑 Полная перезагрузка месяца (сбрасывает кэш)
+        fullRefresh: function(btn) {
+            if (Zarp._refreshing) return;
+            Zarp._refreshing = true;
+            var originalText = btn.textContent;
+            btn.textContent = '⏳';
+            btn.disabled = true;
+
+            var currentKey = State.zarpYear + '_' + State.zarpMonth;
+            // Сбрасываем кэш текущего месяца и перезагружаем
+            State.salaryMonthData = null;
+            State.salaryMonthLoadedKey = null;
+            SalaryCache.clear(currentKey);
+
+            UI.$('monthSummary').innerHTML = '<div class="skeleton" style="height:80px"></div>';
+            UI.$('daysBody').innerHTML = '<tr><td colspan="10" style="text-align:center;padding:20px"><span class="spinner"></span></td></tr>';
+            UI.$('combinedBody').innerHTML = '';
+            UI.$('marksList').innerHTML = '<div class="skeleton" style="height:60px"></div>';
+
+            Api.getSalaryMonth(State.zarpYear, State.zarpMonth).then(function(res) {
+                State.salaryMonthData = res || { days: [], advances: [], marks: [], masters: [] };
+                State.salaryMonthLoadedKey = currentKey;
+                SalaryCache.save(currentKey, State.salaryMonthData);
+                Zarp.render();
+                UI.toast('Данные обновлены', 'success', 1500);
+                Zarp._refreshing = false;
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }).catch(function() {
+                Zarp._refreshing = false;
+                btn.textContent = originalText;
+                btn.disabled = false;
+                UI.toast('Ошибка обновления', 'error');
+            });
         },
 
         loadAndRender: function(force) {
@@ -3221,6 +3332,14 @@ setLoading: function(btnId, loading, textId, loadingText) {
                 UI.toast('Обновлено', 'success', 1500);
             });
 
+            // 🔑 Кнопка «↻ Обновить» на вкладке Новая запись
+            var refreshNR = UI.$('refreshNewRecordBtn');
+            if (refreshNR) {
+                refreshNR.addEventListener('click', function() {
+                    App.refreshNewRecord(this);
+                });
+            }
+
             document.querySelectorAll('.nav-item[data-page]').forEach(function(item) {
                 item.addEventListener('click', function() {
                     var page = this.dataset.page;
@@ -3342,6 +3461,41 @@ setLoading: function(btnId, loading, textId, loadingText) {
             window.Tetradka = Tetradka;
         },
 
+        // 🔑 Обновление данных на вкладке Новая запись
+        refreshNewRecord: function(btn) {
+            var originalText = btn.textContent;
+            btn.textContent = '⏳';
+            btn.disabled = true;
+
+            LocalCache.clear();
+            State.salaryMonthData = null;
+            State.salaryMonthLoadedKey = null;
+            State.pricesLoaded = false;
+
+            Api.getBootstrap().then(function(data) {
+                if (data && !data.error) {
+                    App.applyBootstrap(data);
+                    // 🔑 Перерисовываем слоты и клиентов
+                    NewRecord.renderSlots();
+                    Journal.invalidate();
+                    Clients.invalidate();
+                    Journal.render();
+                    Clients.render();
+                    App.updateStats();
+                    App.saveToCache();
+                    UI.toast('Данные обновлены', 'success', 1500);
+                } else {
+                    UI.toast('Не удалось обновить', 'error');
+                }
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }).catch(function() {
+                btn.textContent = originalText;
+                btn.disabled = false;
+                UI.toast('Ошибка обновления', 'error');
+            });
+        },
+
         init: function() {
             App.bindEvents();
             NewRecord.init();
@@ -3355,7 +3509,6 @@ setLoading: function(btnId, loading, textId, loadingText) {
                 if (!document.hidden) Api.ping();
             }, 300000);
 
-            // Чистка зависших optimistic
             setInterval(function() {
                 var now = Date.now();
                 var had = false;
@@ -3375,7 +3528,6 @@ setLoading: function(btnId, loading, textId, loadingText) {
 
             App.bootstrap();
 
-            // 🔑 Bootstrap реже + пропуск при активной optimistic
             setInterval(function() {
                 if (State.isUpdating || document.hidden || Tetradka._hasChanges) return;
 
