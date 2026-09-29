@@ -174,6 +174,13 @@ body {
     color: var(--text-0); border: 1px solid var(--border-2);
 }
 
+/* ============ ВЫБОР ДАТЫ ============ */
+.date-picker-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: stretch;
+}
 .date-picker-center {
     display: flex; align-items: center; gap: 10px;
     padding: 9px 16px;
@@ -186,6 +193,22 @@ body {
     font-variant-numeric: tabular-nums;
 }
 .date-input-center:focus { outline: none; }
+
+/* 🔑 Кнопка «Сегодня» под календарём */
+.today-btn {
+    justify-content: center;
+    padding: 6px 10px;
+    font-size: 11px;
+    background: linear-gradient(135deg, rgba(77,158,255,0.12), rgba(77,158,255,0.03));
+    border-color: rgba(77,158,255,0.3);
+    color: var(--accent);
+    font-weight: 700;
+}
+.today-btn:hover {
+    background: linear-gradient(135deg, rgba(77,158,255,0.2), rgba(77,158,255,0.06));
+    border-color: rgba(77,158,255,0.5);
+    color: var(--accent);
+}
 
 .month-selector {
     display: flex; align-items: center; gap: 8px;
