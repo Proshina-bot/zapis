@@ -1,19 +1,26 @@
 /* ============================================================
- * PRO-шина · CRM — app.js v2.8
- * Правки:
- *  - Кнопка «↻» обновления записей в Тетрадке
+ * PRO-шина · CRM — app.js v3.0
+ * Мультиоператорный режим (2+ оператора)
+ *
+ * Ключевые механизмы:
+ *  - НЕ оптимистичный UI — сначала checkSlot, потом createRecord
+ *  - submitInFlight — защита от двойного клика
+ *  - Auto-refresh 15 сек — операторы видят чужие записи
+ *  - Server LockService — гарантия от гонки в Sheets
+ *  - Refresh записей Тетрадки — кнопкой
  *  - Пометки за месяц — компактные, комментарий рядом с мастером
- *  - Сводка по дням — узкая колонка «Дата»
+ *  - Узкая колонка «Дата» в сводке по дням
+ *  - Зарплаты — sessionStorage-кэш
  * ============================================================ */
 
 (function() {
     'use strict';
 
     var Config = {
-        APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbyF1Ke8rTmIeCjpJkVsfcnEBW1WMTWaGUslnCmL9vvBnTurA8bq74SDU43ZTy5oJrZq/exec',
+        APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbyo_qc04ddkAkLgVvwwMElcs-UyJ06wdjPRUQSRcjH1ItZy3ZZ4aYrDu6Dy_YbOUCA_/exec',
         CARS: ['1', '2', '3'],
         SIZES: ['R13','R14','R15','R16','R17','R18','R19','R20','R21','R22','R23'],
-        REFRESH_INTERVAL: 60000,
+        REFRESH_INTERVAL: 15000,        // 🔑 было 60000 — теперь 15 сек для мультиоператора
         CACHE_TTL: 60000,
         FETCH_TIMEOUT: 20000,
         FETCH_TIMEOUT_SALARY: 30000,
@@ -102,6 +109,9 @@
         clientRating: null,
         notificationMethod: 'whatsapp',
 
+        // 🔑 Защита от двойного клика
+        submitInFlight: {},
+
         priceBranch: 'ryabinina',
         prices: { ryabinina: null, amundsena: null },
         pricesLoaded: false,
@@ -158,6 +168,14 @@
             }
             return tryOnce();
         },
+
+        // 🔑 Быстрая проверка занятости слота (для мультиоператора)
+        checkSlot: function(branch, date, time, car) {
+            return Api._fetch({ action: 'checkSlot', branch: branch, date: date, time: time, car: car }, 1, 8000);
+        },
+
+        // 🔑 Только занятость — лёгкий запрос для auto-refresh
+        getAll: function() { return Api._fetch({ action: 'getAll' }, 1, 15000); },
         getBootstrap: function() {
             if (State.bootstrapInFlight) return State.bootstrapInFlight;
             State.bootstrapInFlight = Api._fetch({ action: 'getBootstrap' }, 2, 25000).then(function(r) {
@@ -167,12 +185,13 @@
             });
             return State.bootstrapInFlight;
         },
-        getAll: function() { return Api._fetch({ action: 'getAll' }); },
-        createRecord: function(data) { return Api._fetch(Object.assign({ action: 'new' }, data), 1); },
-        deleteRecord: function(slotKey) { return Api._fetch({ action: 'delete', slotKey: slotKey }, 1); },
-        moveRecord: function(oldKey, newKey, data) { return Api._fetch(Object.assign({ action: 'move', oldSlotKey: oldKey, newSlotKey: newKey }, data), 1); },
+        createRecord: function(data) { return Api._fetch(Object.assign({ action: 'new' }, data), 2, 25000); },
+        deleteRecord: function(slotKey) { return Api._fetch({ action: 'delete', slotKey: slotKey }, 2, 25000); },
+        moveRecord: function(oldKey, newKey, data) {
+            return Api._fetch(Object.assign({ action: 'move', oldSlotKey: oldKey, newSlotKey: newKey }, data), 2, 25000);
+        },
         saveExtra: function(slotKey, extraComment, rating, phone) {
-            return Api._fetch({ action: 'saveExtraComment', slotKey: slotKey, extraComment: extraComment, rating: rating, phone: phone }, 1);
+            return Api._fetch({ action: 'saveExtraComment', slotKey: slotKey, extraComment: extraComment, rating: rating, phone: phone }, 2, 25000);
         },
         getPrices: function() { return Api._fetch({ action: 'getPrices' }); },
         getMasters: function() { return Api._fetch({ action: 'getMasters' }); },
@@ -185,7 +204,8 @@
         deleteMark: function(id) { return Api._fetch({ action: 'deleteMark', id: id }, 1); },
         closeMonth: function(data) { return Api._fetch(Object.assign({ action: 'closeMonth' }, data), 1, 30000); },
         updateRecordStatus: function(recordKey, status) { return Api._fetch({ action: 'updateRecordStatus', recordKey: recordKey, status: status }, 1); },
-        getRecordPayment: function(recordKey) { return Api._fetch({ action: 'getRecordPayment', recordKey: recordKey }); }
+        getRecordPayment: function(recordKey) { return Api._fetch({ action: 'getRecordPayment', recordKey: recordKey }); },
+        ping: function() { return Api._fetch({ action: 'ping' }, 0, 5000); }
     };
 
     var Utils = {
@@ -292,7 +312,6 @@
             n = Number(n) || 0;
             return n.toLocaleString('ru-RU') + ' ₽';
         },
-        // Экранирование для вставки в HTML (комментарии могут содержать спецсимволы)
         escapeHtml: function(str) {
             if (str === null || str === undefined) return '';
             return String(str)
@@ -367,7 +386,7 @@
     };
 
     // ================================================================
-    // 📝 NEW RECORD
+    // 📝 NEW RECORD — 🔑 мультиоператорный режим (без optimistic UI)
     // ================================================================
     var NewRecord = {
         initPhone: function() {
@@ -620,6 +639,7 @@
             submitEl.disabled = !ready;
         },
 
+        // 🔑 МУЛЬТИОПЕРАТОРНЫЙ SUBMIT — сначала checkSlot, потом createRecord
         submit: function() {
             var phone = UI.$('phone').value.trim();
             if (phone.replace(/\D/g, '').length < 11) { UI.toast('Введите корректный телефон', 'error'); return; }
@@ -627,11 +647,8 @@
             if (State.selectedServices.length === 0) { UI.toast('Выберите услугу', 'warning'); return; }
             if (!State.selectedSize) { UI.toast('Выберите размер', 'warning'); return; }
 
-            var submitBtn = UI.$('submitBtn');
-            submitBtn.disabled = true;
-            UI.setLoading('submitBtn', true, 'submitText', 'Отправка...');
-
-            var data = {
+            // 🔑 Фиксируем данные на момент клика
+            var payload = {
                 branch: State.currentBranch,
                 date: State.currentSelection.date,
                 time: State.currentSelection.time,
@@ -645,32 +662,93 @@
                 rating: State.clientRating || 'neutral',
                 notificationMethod: State.notificationMethod
             };
+            var slotKey = Utils.normalizeSlotKey(
+                payload.branch + '_' + payload.date + '_' + payload.time + '_' + payload.car
+            );
 
-            Api.createRecord(data).then(function(res) {
-                UI.setLoading('submitBtn', false);
-                submitBtn.disabled = false;
+            // 🔑 Защита от двойного клика
+            if (State.submitInFlight[slotKey]) {
+                UI.toast('Уже отправляется...', 'warning', 1500);
+                return;
+            }
+            State.submitInFlight[slotKey] = true;
 
-                if (!res || res.error) {
-                    var msg = (res && res.error) ? res.error : 'Ошибка соединения. Попробуйте ещё раз.';
-                    UI.toast(msg, 'error', 5000);
+            var submitBtn = UI.$('submitBtn');
+            submitBtn.disabled = true;
+            UI.setLoading('submitBtn', true, 'submitText', 'Проверяем...');
+
+            // 🔑 ШАГ 1: checkSlot — быстрая проверка занятости
+            Api.checkSlot(payload.branch, payload.date, payload.time, payload.car).then(function(check) {
+                // Если проверка не ответила (null) — пропускаем, сервер всё равно проверит
+                if (check && !check.error && check.busy) {
+                    delete State.submitInFlight[slotKey];
+                    submitBtn.disabled = false;
+                    UI.setLoading('submitBtn', false);
+                    UI.toast('Слот уже занят другим оператором', 'error', 4000);
+                    // 🔑 Обновляем записи — показываем актуальное состояние
+                    App.bootstrap();
                     return;
                 }
 
-                State.occupiedSlots = Utils.normalizeAllKeys(res);
-                App.rebuildClients();
-                App.saveToCache();
-                NewRecord.renderSlots();
-                Journal.render();
-                Clients.render();
-                App.updateStats();
+                // 🔑 ШАГ 2: слот свободен — создаём запись
+                UI.setLoading('submitBtn', true, 'submitText', 'Запись...');
 
-                UI.toast('Клиент записан', 'success');
-                NewRecord.resetForm();
-                NewRecord.updateSubmitState();
+                Api.createRecord(payload).then(function(res) {
+                    delete State.submitInFlight[slotKey];
+                    submitBtn.disabled = false;
+                    UI.setLoading('submitBtn', false);
+
+                    // 🔑 Случай A: сеть полностью упала
+                    if (res === null) {
+                        UI.toast('Не удалось отправить. Проверьте сеть.', 'error', 5000);
+                        // Проверяем — может всё-таки записалось
+                        setTimeout(function() {
+                            App.bootstrap().then(function() {
+                                if (State.occupiedSlots[slotKey]) {
+                                    UI.toast('✓ Запись подтверждена', 'success', 2000);
+                                }
+                            });
+                        }, 2500);
+                        return;
+                    }
+
+                    // 🔑 Случай B: серверная ошибка (слот занят / невалид)
+                    if (res.error) {
+                        UI.toast(res.error, 'error', 5000);
+                        App.bootstrap();
+                        return;
+                    }
+
+                    // 🔑 Случай C: успех — сервер вернул { ok, slotKey, record }
+                    if (res.ok && res.slotKey && res.record) {
+                        State.occupiedSlots[res.slotKey] = res.record;
+                        App.rebuildClients();
+                        App.saveToCache();
+                        NewRecord.renderSlots();
+                        Journal.render();
+                        Clients.render();
+                        App.updateStats();
+
+                        UI.toast('Клиент записан', 'success');
+                        NewRecord.resetForm();
+                        NewRecord.updateSubmitState();
+                    } else {
+                        // Непонятный ответ — перезагружаем всё
+                        App.bootstrap();
+                    }
+                }).catch(function() {
+                    delete State.submitInFlight[slotKey];
+                    submitBtn.disabled = false;
+                    UI.setLoading('submitBtn', false);
+                    UI.toast('Ошибка соединения', 'error', 5000);
+                    setTimeout(function() { App.bootstrap(); }, 2000);
+                });
             }).catch(function() {
-                UI.setLoading('submitBtn', false);
+                // checkSlot упал — всё равно пробуем создать (сервер проверит)
+                delete State.submitInFlight[slotKey];
                 submitBtn.disabled = false;
-                UI.toast('Ошибка соединения. Попробуйте ещё раз.', 'error', 5000);
+                UI.setLoading('submitBtn', false);
+                UI.toast('Не удалось проверить слот. Попробуйте ещё раз.', 'error', 4000);
             });
         },
 
@@ -780,8 +858,8 @@
                 var newRatingVal = newRating || 'neutral';
 
                 Api.saveExtra(slotKey, extra, newRatingVal, data.phone || '').then(function(res) {
-                    if (res && !res.error) {
-                        State.occupiedSlots = Utils.normalizeAllKeys(res);
+                    if (res && !res.error && res.ok && res.record) {
+                        State.occupiedSlots[res.slotKey] = res.record;
                         App.rebuildClients();
                         App.saveToCache();
                         NewRecord.renderSlots();
@@ -789,6 +867,8 @@
                         Clients.render();
                         if (UI.$('page-tetradka').classList.contains('active')) Tetradka.renderAll();
                         UI.toast('Комментарий сохранён', 'success');
+                    } else if (res && res.error) {
+                        UI.toast(res.error, 'error');
                     } else {
                         UI.toast('Ошибка сохранения', 'error');
                     }
@@ -802,7 +882,8 @@
                 UI.setLoading('deleteRecordBtn', true, null, 'Удаление...');
                 Api.deleteRecord(slotKey).then(function(res) {
                     if (res && !res.error) {
-                        State.occupiedSlots = Utils.normalizeAllKeys(res);
+                        // 🔑 Удаляем локально по ключу
+                        delete State.occupiedSlots[slotKey];
                         App.rebuildClients();
                         App.saveToCache();
                         NewRecord.renderSlots();
@@ -811,7 +892,7 @@
                         if (UI.$('page-tetradka').classList.contains('active')) Tetradka.renderAll();
                         UI.toast('Запись удалена', 'success');
                     } else {
-                        UI.toast('Ошибка удаления', 'error');
+                        UI.toast((res && res.error) || 'Ошибка удаления', 'error');
                     }
                     Records.closeModal();
                 });
@@ -880,8 +961,10 @@
                     notificationMethod: data.notificationMethod || 'whatsapp'
                 }).then(function(res) {
                     UI.setLoading('confirmMoveBtn', false);
-                    if (res && !res.error) {
-                        State.occupiedSlots = Utils.normalizeAllKeys(res);
+                    if (res && !res.error && res.ok && res.newKey && res.record) {
+                        // 🔑 Удаляем старую, добавляем новую
+                        delete State.occupiedSlots[res.oldKey || ctx.oldKey];
+                        State.occupiedSlots[res.newKey] = res.record;
                         App.rebuildClients();
                         App.saveToCache();
                         NewRecord.renderSlots();
@@ -1164,15 +1247,16 @@
                 .filter(function(e) { return Utils.cleanPhone(e[1].phone) === phone; })
                 .map(function(e) { return e[0]; });
 
+            // 🔑 Отправляем параллельно все saveExtra, но только первый успешный результат используем
             Promise.all(keys.map(function(k) {
                 return Api.saveExtra(k, State.occupiedSlots[k].extraComment || '', target, State.occupiedSlots[k].phone || '');
             })).then(function(results) {
-                for (var i = results.length - 1; i >= 0; i--) {
-                    if (results[i] && !results[i].error) {
-                        State.occupiedSlots = Utils.normalizeAllKeys(results[i]);
-                        break;
+                // 🔑 Каждый saveExtra вернул { ok, slotKey, record } — обновляем все
+                results.forEach(function(res) {
+                    if (res && !res.error && res.ok && res.slotKey && res.record) {
+                        State.occupiedSlots[res.slotKey] = res.record;
                     }
-                }
+                });
                 App.rebuildClients();
                 App.saveToCache();
                 Clients.render();
@@ -1334,17 +1418,14 @@
 
                 Api.getSalaryDay(d.date, d.branch).then(function(res) {
                     if (res && !res.error) {
-                        // Сохраняем локальные изменения
                         var savedCars = d.cars;
                         var savedAdvances = d.advances;
                         var savedCash = d.cash;
                         var savedMastersOnShift = d.mastersOnShift;
                         var savedServices = d.services;
 
-                        // Применяем свежие данные
                         Tetradka.applyServerData(d.branch, d.date, res);
 
-                        // Возвращаем локальные данные (не перезаписываем то, что юзер редактирует)
                         var newD = State.tetradka[d.branch];
                         if (newD) {
                             newD.cars = savedCars;
@@ -1352,9 +1433,7 @@
                             newD.cash = savedCash;
                             newD.mastersOnShift = savedMastersOnShift;
                             newD.services = savedServices;
-                            // ВАЖНО: только records обновляем из свежих
                             newD.records = Tetradka.getRecordsForDate(d.date, d.branch);
-                            // Связываем status со свежими
                             var freshCars = (res.cars || []);
                             newD.records.forEach(function(rec) {
                                 var linked = freshCars.find(function(c) { return c.recordKey === rec.key; });
@@ -2528,7 +2607,6 @@
             days.forEach(function(d) { Object.keys(d.payroll || {}).forEach(function(m) { mastersOfBranch[m] = true; }); });
             var masterNames = Object.keys(mastersOfBranch);
 
-            // 🔑 Узкая колонка «Дата»
             var headHtml = '<tr><th style="width:46px;min-width:46px;max-width:46px;text-align:center">Дата</th><th>Касса</th><th>СПБ</th><th>Б/Н</th><th>Карта</th><th>Нал</th><th>Альмир</th><th>Счёт</th><th>Выручка</th>';
             headHtml += '<th style="text-align:center;background:rgba(77,158,255,0.1);color:var(--accent)" colspan="' + masterNames.length + '">Зарплаты мастеров</th></tr>';
             var headHtml2 = '<tr><th style="width:46px;min-width:46px;max-width:46px"></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th>';
@@ -2642,7 +2720,6 @@
             UI.$('combinedBody').innerHTML = html;
         },
 
-        // 🔑 Пометки за месяц — компактные, комментарий рядом с мастером
         renderMarks: function(data) {
             var allItems = [];
 
@@ -2681,7 +2758,6 @@
                     html += '<div class="mark-item ' + item.type + '">';
                     html += '<div class="date">' + item.date.slice(8) + '.' + item.date.slice(5, 7) + '</div>';
                     html += '<div class="branch-ico" title="' + (item.branch === 'ryabinina' ? 'Рябинина' : item.branch === 'amundsena' ? 'Амундсена' : '—') + '">' + branchIco + '</div>';
-                    // 🔑 Мастер + комментарий в одну строку
                     html += '<div class="master-block">';
                     html += '<span class="master">' + Utils.escapeHtml(item.master) + '</span>';
                     if (item.comment) html += '<span class="comment">· ' + Utils.escapeHtml(item.comment) + '</span>';
@@ -3101,7 +3177,7 @@
 
             document.addEventListener('visibilitychange', function() {
                 if (!document.hidden && !State.isUpdating) {
-                    if (Date.now() - State.lastBootstrapAt > 90000) App.bootstrap();
+                    if (Date.now() - State.lastBootstrapAt > 30000) App.bootstrap();
                 }
             });
 
@@ -3130,13 +3206,31 @@
             flatpickr.localize(flatpickr.l10ns.ru);
             State.tetradkaDate = new Date().toISOString().slice(0, 10);
 
+            // 🔑 keepalive — не даём Apps Script уснуть
+            setInterval(function() {
+                if (!document.hidden) Api.ping();
+            }, 240000);
+            setTimeout(function() { Api.ping(); }, 1000);
+
             App.bootstrap();
 
+            // 🔑 Auto-refresh каждые 15 сек (мультиоператор)
+            // Не срабатывает, если открыта Тетрадка с несохранёнными изменениями
             setInterval(function() {
-                if (!State.isUpdating && !document.hidden && !Tetradka._hasChanges) {
-                    State.isUpdating = true;
-                    App.bootstrap().then(function() { State.isUpdating = false; });
-                }
+                if (State.isUpdating || document.hidden) return;
+                if (Tetradka._hasChanges) return;
+                State.isUpdating = true;
+                Api.getAll().then(function(records) {
+                    if (records && !records.error) {
+                        State.occupiedSlots = Utils.normalizeAllKeys(records);
+                        App.rebuildClients();
+                        NewRecord.renderSlots();
+                        App.updateStats();
+                        // Не рендерим журнал и клиентов — экономим CPU
+                        if (UI.$('page-journal').classList.contains('active')) Journal.render();
+                    }
+                    State.isUpdating = false;
+                }).catch(function() { State.isUpdating = false; });
             }, Config.REFRESH_INTERVAL);
         }
     };
