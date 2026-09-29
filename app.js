@@ -179,30 +179,33 @@
             return Config.APPS_SCRIPT_URL_READ;
         },
 
-        _fetchPost: function(params, timeout) {
-            var action = params.action || '';
-            var baseUrl = Api._urlFor(action);
+      _fetchPost: function(params, timeout) {
+    var action = params.action || '';
+    var baseUrl = Api._urlFor(action);
 
-            return new Promise(function(resolve, reject) {
-                var controller = new AbortController();
-                var timer = setTimeout(function() { controller.abort(); reject(new Error('timeout')); }, timeout);
+    // 🔑 GET с параметрами в URL — самый надёжный способ для Apps Script
+    var url = baseUrl + '?' + new URLSearchParams(
+        Object.assign({}, params, { _: Date.now() })
+    ).toString();
 
-                // 🔑 Content-Type: text/plain — обход preflight OPTIONS
-                fetch(baseUrl, {
-                    method: 'POST',
-                    mode: 'cors',
-                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                    body: JSON.stringify(params),
-                    signal: controller.signal
-                })
-                .then(function(res) {
-                    clearTimeout(timer);
-                    if (!res.ok) { reject(new Error('HTTP ' + res.status)); return; }
-                    resolve(res);
-                })
-                .catch(function(e) { clearTimeout(timer); reject(e); });
-            });
-        },
+    return new Promise(function(resolve, reject) {
+        var controller = new AbortController();
+        var timer = setTimeout(function() { controller.abort(); reject(new Error('timeout')); }, timeout);
+
+        fetch(url, {
+            method: 'GET',
+            mode: 'cors',
+            redirect: 'follow',
+            signal: controller.signal
+        })
+        .then(function(res) {
+            clearTimeout(timer);
+            if (!res.ok) { reject(new Error('HTTP ' + res.status)); return; }
+            resolve(res);
+        })
+        .catch(function(e) { clearTimeout(timer); reject(e); });
+    });
+},
 
         _fetch: function(params, retries, timeout) {
             retries = (retries === undefined) ? Config.MAX_RETRIES : retries;
