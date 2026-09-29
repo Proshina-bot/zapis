@@ -1,29 +1,42 @@
 /* ============================================================
- * PRO-шина · CRM — app.js v3.1
+ * PRO-шина · CRM — app.js v3.2
  *
- * ФИНАЛЬНЫЕ ИСПРАВЛЕНИЯ:
- *  1. formatPhone: правильный ввод телефона без зеркалирования
- *  2. renderSlots: делегирование событий, без cloneNode
- *  3. applyBootstrap: правильный порядок merge optimistic
- *  4. Journal/Clients: версионный _renderVersion
- *  5. saveRating: batch-запрос одним вызовом
- *  6. submit timeout: verifyRecordSaved (не полный bootstrap)
- *  7. total в renderSlots: исключает обед
- *  8. XSS: escapeHtml везде, data-attrs вместо inline onclick
- *  9. LocalCache: проверка isStale
- * 10. createRecord/delete/move без retry (устраняет дубли)
+ * КЛЮЧЕВЫЕ ИЗМЕНЕНИЯ v3.2:
+ *  1. Разделение на READ / WRITE Apps Script (два URL)
+ *  2. Удалён verifyRecordSaved — был главным тормозом
+ *  3. submit: timeout → один bootstrap через 15 сек
+ *  4. submitInFlight ВСЕГДА снимается
+ *  5. Ping только один при загрузке (не каждые 4 мин)
+ *  6. bootstrap только при видимой вкладке, раз в 2 мин
+ *  7. createRecord timeout: 20 сек вместо 30
+ *
+ * ИСПРАВЛЕНИЯ v3.1 (сохранены):
+ *  - formatPhone без зеркалирования
+ *  - renderSlots с делегированием
+ *  - applyBootstrap правильный merge
+ *  - Journal/Clients версионные
+ *  - saveRating batch
+ *  - XSS escape везде
+ *  - LocalCache проверяет isStale
  * ============================================================ */
 
 (function() {
     'use strict';
 
     var Config = {
-        APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbzJC0K6REdI6YHmJjv7cmbhbgvPGHg5m21QpO_RCcHKt2d6-SjHEgdQ8Cf3movE8JFX/exec',
+        // 🔑 READ — чтение: getBootstrap, getAll, getSalaryMonth, getSalaryDay, getPrices, getMasters, ping
+        APPS_SCRIPT_URL_READ: 'https://script.google.com/macros/s/AKfycbzmVia3zmLr3644QQpVSHhXmxWcmbc2PcAgYTkjkliVEcsms4bAdgCA13UchlXcWlWHHw/exec',
+        // 🔑 WRITE — запись: new, delete, move, saveExtraComment, saveExtraBatch, saveSalaryDay,
+        //                     updateRecordStatus, addMark, deleteMark, addAdvance, deleteAdvance, closeMonth
+        APPS_SCRIPT_URL_WRITE: 'https://script.google.com/macros/s/AKfycbwy7h9hvXs-eBCyeZgTJ-v_lnv2ZSc-Ggh7q7zMWkC9H6tzsMBBqiivQejmGZHo-OHWCA/exec',
+
         CARS: ['1', '2', '3'],
         SIZES: ['R13','R14','R15','R16','R17','R18','R19','R20','R21','R22','R23'],
-        REFRESH_INTERVAL: 60000,
+        REFRESH_INTERVAL: 120000,           // 🔑 2 мин вместо 60 сек
+        BOOTSTRAP_MIN_INTERVAL: 90000,      // минимум между bootstrap
         FETCH_TIMEOUT: 20000,
         FETCH_TIMEOUT_SALARY: 30000,
+        FETCH_TIMEOUT_WRITE: 20000,         // 🔑 для createRecord
         MAX_RETRIES: 2,
         MAX_RETRIES_SALARY: 1,
         AUTOSAVE_INTERVAL: 30000,
@@ -32,7 +45,15 @@
         SESSION_SALARY_KEY: 'proshina_salary_month_v1',
         SESSION_SALARY_MAX_AGE: 900000,
         PHONE_PREFIX: '+7 ( ',
-        OPTIMISTIC_TTL: 60000
+        OPTIMISTIC_TTL: 60000,
+        WRITE_ACTIONS: [
+            'new', 'delete', 'move',
+            'saveExtraComment', 'saveExtraBatch',
+            'saveSalaryDay', 'updateRecordStatus',
+            'addMark', 'deleteMark',
+            'addAdvance', 'deleteAdvance',
+            'closeMonth'
+        ]
     };
 
     // ============================================================
@@ -160,6 +181,14 @@
     // 🌐 API
     // ============================================================
     var Api = {
+        // 🔑 Выбор URL по action
+        _urlFor: function(action) {
+            if (Config.WRITE_ACTIONS.indexOf(action) !== -1) {
+                return Config.APPS_SCRIPT_URL_WRITE;
+            }
+            return Config.APPS_SCRIPT_URL_READ;
+        },
+
         _fetchWithTimeout: function(url, timeout) {
             return new Promise(function(resolve, reject) {
                 var controller = new AbortController();
@@ -173,12 +202,17 @@
                     .catch(function(e) { clearTimeout(timer); reject(e); });
             });
         },
+
         _fetch: function(params, retries, timeout) {
             retries = (retries === undefined) ? Config.MAX_RETRIES : retries;
             timeout = timeout || Config.FETCH_TIMEOUT;
-            var url = Config.APPS_SCRIPT_URL + '?' + new URLSearchParams(
+
+            var action = params.action || '';
+            var baseUrl = Api._urlFor(action);
+            var url = baseUrl + '?' + new URLSearchParams(
                 Object.assign({}, params, { _: Date.now() })
             ).toString();
+
             var self = this;
             var attempt = 0;
             function tryOnce() {
@@ -192,7 +226,9 @@
             }
             return tryOnce();
         },
+
         ping: function() { return Api._fetch({ action: 'ping' }, 0, 5000); },
+
         getBootstrap: function() {
             if (State.bootstrapInFlight) return State.bootstrapInFlight;
             State.bootstrapInFlight = Api._fetch({ action: 'getBootstrap' }, 2, 25000).then(function(r) {
@@ -202,8 +238,13 @@
             });
             return State.bootstrapInFlight;
         },
+
         getAll: function() { return Api._fetch({ action: 'getAll' }); },
-        createRecord: function(data) { return Api._fetch(Object.assign({ action: 'new' }, data), 0, 30000); },
+
+        // 🔑 createRecord: 20 сек, без retry
+        createRecord: function(data) {
+            return Api._fetch(Object.assign({ action: 'new' }, data), 0, Config.FETCH_TIMEOUT_WRITE);
+        },
         deleteRecord: function(slotKey) { return Api._fetch({ action: 'delete', slotKey: slotKey }, 0, 20000); },
         moveRecord: function(oldKey, newKey, data) {
             return Api._fetch(Object.assign({ action: 'move', oldSlotKey: oldKey, newSlotKey: newKey }, data), 0, 20000);
@@ -259,19 +300,14 @@
             return out;
         },
 
-        // 🔑 ФИНАЛЬНАЯ ВЕРСИЯ — не зеркалит, курсор не прыгает
+        // 🔑 formatPhone без зеркалирования
         formatPhone: function(value, cursorPos) {
-            // 1. Только цифры
             var digits = value.replace(/\D/g, '');
-
-            // 2. Убираем ведущую 7/8 (код страны)
             if (digits.length > 0 && (digits[0] === '7' || digits[0] === '8')) {
                 digits = digits.substring(1);
             }
-            // 3. Максимум 10 цифр
             digits = digits.substring(0, 10);
 
-            // 4. Собираем строку
             var result = '+7';
             if (digits.length > 0) {
                 result += ' (' + digits.substring(0, 3);
@@ -288,7 +324,6 @@
                 result += ' (';
             }
 
-            // 5. Восстановление курсора
             var cursor = cursorPos === undefined ? value.length : cursorPos;
             var digitsBefore = value.substring(0, cursor).replace(/\D/g, '');
             if (digitsBefore.length > 0 && (digitsBefore[0] === '7' || digitsBefore[0] === '8')) {
@@ -530,7 +565,6 @@
             });
             UI.$('sizesGrid').appendChild(sizesFragment);
 
-            // 🔑 Телефон: правильный ввод без зеркалирования
             var phoneEl = UI.$('phone');
             NewRecord.initPhone();
             phoneEl.addEventListener('focus', function() {
@@ -587,7 +621,6 @@
             grid.appendChild(fragment);
         },
 
-        // 🔑 renderSlots: делегирование, без cloneNode
         renderSlots: function() {
             var date = UI.$('datePicker').value;
             if (!date) return;
@@ -726,6 +759,7 @@
             submitEl.disabled = !ready;
         },
 
+        // 🔑 УПРОЩЁННЫЙ SUBMIT — без verifyRecordSaved
         submit: function() {
             var phone = UI.$('phone').value.trim();
             if (phone.replace(/\D/g, '').length < 11) { UI.toast('Введите корректный телефон', 'error'); return; }
@@ -751,6 +785,7 @@
                 payload.branch + '_' + payload.date + '_' + payload.time + '_' + payload.car
             );
 
+            // 🔑 Защита от двойного клика
             if (State.submitInFlight[slotKey]) {
                 UI.toast('Уже отправляется...', 'warning', 1500);
                 return;
@@ -762,6 +797,7 @@
                 return;
             }
 
+            // Чистим зависшие optimistic
             var now = Date.now();
             Object.keys(State.occupiedSlots).forEach(function(k) {
                 var rec = State.occupiedSlots[k];
@@ -775,6 +811,7 @@
             submitBtn.disabled = true;
             UI.setLoading('submitBtn', true, 'submitText', 'Запись...');
 
+            // Optimistic UI
             State.occupiedSlots[slotKey] = {
                 services: State.selectedServices.slice(),
                 size: payload.size,
@@ -798,14 +835,24 @@
             submitBtn.disabled = false;
             UI.setLoading('submitBtn', false);
 
+            // 🔑 Отправка — упрощённая обработка
             Api.createRecord(payload).then(function(res) {
+                // 🔑 Флаг снимаем ВСЕГДА
                 delete State.submitInFlight[slotKey];
 
+                // Случай A: timeout (null) — оставляем optimistic, ОДИН bootstrap через 15 сек
                 if (res === null) {
-                    UI.toast('Проверяем сохранение...', 'info', 2500);
-                    App.verifyRecordSaved(slotKey, payload, 0);
+                    UI.toast('Сохранение в процессе...', 'info', 2500);
+                    setTimeout(function() {
+                        // Проверяем, что запись всё ещё optimistic (не подтверждена другим путём)
+                        if (State.occupiedSlots[slotKey] && State.occupiedSlots[slotKey]._optimistic) {
+                            App.bootstrap();
+                        }
+                    }, 15000);
                     return;
                 }
+
+                // Случай B: серверная ошибка (например, «слот занят») — откат
                 if (res.error) {
                     delete State.occupiedSlots[slotKey];
                     App.removeClientByKey(slotKey);
@@ -818,6 +865,8 @@
                     UI.toast(res.error, 'error', 5000);
                     return;
                 }
+
+                // Случай C: успех
                 if (res.ok && res.slotKey && res.record) {
                     if (res.slotKey !== slotKey) {
                         delete State.occupiedSlots[slotKey];
@@ -835,12 +884,18 @@
                     App.updateStats();
                     UI.toast('✓ Синхронизировано', 'success', 1200);
                 } else {
+                    // Непредвиденный ответ — мягкий bootstrap
                     App.bootstrap();
                 }
             }).catch(function() {
+                // 🔑 Сетевая ошибка — снимаем флаг, optimistic оставляем
                 delete State.submitInFlight[slotKey];
-                UI.toast('Проверяем сохранение...', 'info', 2500);
-                App.verifyRecordSaved(slotKey, payload, 0);
+                UI.toast('Сохранение в процессе...', 'info', 2500);
+                setTimeout(function() {
+                    if (State.occupiedSlots[slotKey] && State.occupiedSlots[slotKey]._optimistic) {
+                        App.bootstrap();
+                    }
+                }, 15000);
             });
         },
 
@@ -1673,7 +1728,7 @@
                             cash: JSON.stringify(d.cash),
                             advances: JSON.stringify(d.advances)
                         });
-                        try { navigator.sendBeacon(Config.APPS_SCRIPT_URL, params); } catch (e) {}
+                        try { navigator.sendBeacon(Config.APPS_SCRIPT_URL_WRITE, params); } catch (e) {}
                     }
                 }
             });
@@ -2538,7 +2593,7 @@
                         State.salaryMonthLoadedKey = null;
                         SalaryCache.clearAll();
                         Zarp.loadAndRender(true);
-                    } else UI.toast('Ошибка', 'error');
+                    } else UI.toast((res && res.error) || 'Ошибка', 'error');
                 });
             });
             UI.$('addMarkBtn').addEventListener('click', Zarp.openMarkModal);
@@ -2852,7 +2907,7 @@
                         State.salaryMonthLoadedKey = null;
                         SalaryCache.clear(State.zarpYear + '_' + State.zarpMonth);
                         Zarp.loadAndRender(true);
-                    } else UI.toast('Ошибка', 'error');
+                    } else UI.toast((res && res.error) || 'Ошибка', 'error');
                 });
             });
         },
@@ -2925,51 +2980,6 @@
             if (c.visits <= 0) delete State.clientsDatabase[phone];
             State.clientsVersion++;
             State.journalVersion++;
-        },
-
-        verifyRecordSaved: function(slotKey, payload, attempt) {
-            attempt = attempt || 0;
-            if (attempt > 3) {
-                UI.toast('Не удалось подтвердить запись — обновляем', 'warning', 3000);
-                App.bootstrap();
-                return;
-            }
-            Api.getAll().then(function(res) {
-                if (!res || res.error) {
-                    setTimeout(function() {
-                        App.verifyRecordSaved(slotKey, payload, attempt + 1);
-                    }, 3000 * (attempt + 1));
-                    return;
-                }
-                var normalized = Utils.normalizeAllKeys(res);
-                if (normalized[slotKey]) {
-                    State.occupiedSlots = normalized;
-                    App.rebuildClients();
-                    App.saveToCache();
-                    NewRecord.renderSlots();
-                    Journal.invalidate();
-                    Clients.invalidate();
-                    Journal.render();
-                    Clients.render();
-                    App.updateStats();
-                    UI.toast('✓ Запись подтверждена', 'success', 1500);
-                } else {
-                    delete State.occupiedSlots[slotKey];
-                    App.removeClientByKey(slotKey);
-                    App.rebuildClients();
-                    NewRecord.renderSlots();
-                    Journal.invalidate();
-                    Clients.invalidate();
-                    Journal.render();
-                    Clients.render();
-                    App.updateStats();
-                    UI.toast('Запись не сохранилась — повторите', 'error', 5000);
-                }
-            }).catch(function() {
-                setTimeout(function() {
-                    App.verifyRecordSaved(slotKey, payload, attempt + 1);
-                }, 3000 * (attempt + 1));
-            });
         },
 
         saveToCache: function() {
@@ -3341,6 +3351,7 @@
                 if (window.innerWidth > 900) App.toggleSidebar(false);
             });
 
+            // 🔑 При возврате на вкладку — если давно не обновлялись, перезагружаем
             document.addEventListener('visibilitychange', function() {
                 if (!document.hidden && !State.isUpdating) {
                     if (Date.now() - State.lastBootstrapAt > 90000) App.bootstrap();
@@ -3372,11 +3383,11 @@
             flatpickr.localize(flatpickr.l10ns.ru);
             State.tetradkaDate = new Date().toISOString().slice(0, 10);
 
+            // 🔑 Один ping при загрузке — прогреваем Apps Script
             setTimeout(function() { Api.ping(); }, 500);
-            setInterval(function() {
-                if (!document.hidden) Api.ping();
-            }, 240000);
+            // Больше НЕ пингуем по таймеру — экономим квоту
 
+            // Чистка зависших optimistic
             setInterval(function() {
                 var now = Date.now();
                 var had = false;
@@ -3396,11 +3407,14 @@
 
             App.bootstrap();
 
+            // 🔑 Фоновый bootstrap: 2 мин, только видимая вкладка, минимум 90 сек между
             setInterval(function() {
-                if (!State.isUpdating && !document.hidden && !Tetradka._hasChanges) {
-                    State.isUpdating = true;
-                    App.bootstrap().then(function() { State.isUpdating = false; });
-                }
+                if (document.hidden) return;
+                if (State.isUpdating) return;
+                if (Tetradka._hasChanges) return;
+                if (Date.now() - State.lastBootstrapAt < Config.BOOTSTRAP_MIN_INTERVAL) return;
+                State.isUpdating = true;
+                App.bootstrap().then(function() { State.isUpdating = false; });
             }, Config.REFRESH_INTERVAL);
         }
     };
