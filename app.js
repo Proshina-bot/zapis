@@ -1,35 +1,25 @@
 /* ============================================================
- * PRO-шина · CRM — app.js v3.3
+ * PRO-шина · CRM — app.js v3.2
  *
- * ИЗМЕНЕНИЯ v3.3:
- *  - POST с JSON-телом вместо GET (обход потери параметров Apps Script)
- *  - Content-Type: text/plain — обход preflight OPTIONS
- *  - Разделение READ/WRITE URL
- *
- * ИСПРАВЛЕНИЯ v3.2:
- *  - Удалён verifyRecordSaved
- *  - submit: timeout → один bootstrap через 15 сек
- *  - submitInFlight всегда снимается
- *  - Ping один при загрузке
- *  - bootstrap 2 мин, только видимая вкладка
+ * ИСПРАВЛЕНИЯ ОТНОСИТЕЛЬНО v3.1:
+ *  - Убрана verifyRecordSaved (она тормозила Apps Script)
+ *  - submitInFlight снимается ВСЕГДА (не зависает)
+ *  - createRecord timeout 20с (было 30с) — быстрее реакция
+ *  - bootstrap реже: 120с (было 60с)
+ *  - bootstrap пропускается при активной optimistic-записи
+ *  - При timeout — один отложенный bootstrap через 15с (не 4 подряд)
  * ============================================================ */
 
 (function() {
     'use strict';
 
     var Config = {
-        // 🔑 READ — чтение
-        APPS_SCRIPT_URL_READ: 'https://script.google.com/macros/s/AKfycbw1_34-xP15MuenSVFVBinIZ7al95PlwvAwHKVyP1QaOP4l1G4Iq-orBDTjAAqPn9_KqQ/exec',
-        // 🔑 WRITE — запись
-        APPS_SCRIPT_URL_WRITE: 'https://script.google.com/macros/s/AKfycbzetArbaMT_outnfjjO6-GuU2EDOknZPj7l4U2gcyWvnvtYa4Q-8kxmanxE7F_VbYaivg/exec',
-
+        APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbyyS4_VX8yLb9Pty9Y4684jm6tpvDJSqhFy9iy4EVFjROKwyG12koVXUW6wwD-zV1k/exec',
         CARS: ['1', '2', '3'],
         SIZES: ['R13','R14','R15','R16','R17','R18','R19','R20','R21','R22','R23'],
         REFRESH_INTERVAL: 120000,
-        BOOTSTRAP_MIN_INTERVAL: 90000,
         FETCH_TIMEOUT: 20000,
         FETCH_TIMEOUT_SALARY: 30000,
-        FETCH_TIMEOUT_WRITE: 20000,
         MAX_RETRIES: 2,
         MAX_RETRIES_SALARY: 1,
         AUTOSAVE_INTERVAL: 30000,
@@ -39,14 +29,7 @@
         SESSION_SALARY_MAX_AGE: 900000,
         PHONE_PREFIX: '+7 ( ',
         OPTIMISTIC_TTL: 60000,
-        WRITE_ACTIONS: [
-            'new', 'delete', 'move',
-            'saveExtraComment', 'saveExtraBatch',
-            'saveSalaryDay', 'updateRecordStatus',
-            'addMark', 'deleteMark',
-            'addAdvance', 'deleteAdvance',
-            'closeMonth'
-        ]
+        VERIFY_DELAY: 15000
     };
 
     // ============================================================
@@ -174,59 +157,39 @@
     // 🌐 API
     // ============================================================
     var Api = {
-        _urlFor: function(action) {
-            if (Config.WRITE_ACTIONS.indexOf(action) !== -1) return Config.APPS_SCRIPT_URL_WRITE;
-            return Config.APPS_SCRIPT_URL_READ;
+        _fetchWithTimeout: function(url, timeout) {
+            return new Promise(function(resolve, reject) {
+                var controller = new AbortController();
+                var timer = setTimeout(function() { controller.abort(); reject(new Error('timeout')); }, timeout);
+                fetch(url, { signal: controller.signal })
+                    .then(function(res) {
+                        clearTimeout(timer);
+                        if (!res.ok) reject(new Error('HTTP ' + res.status));
+                        else resolve(res);
+                    })
+                    .catch(function(e) { clearTimeout(timer); reject(e); });
+            });
         },
-
-      _fetchPost: function(params, timeout) {
-    var action = params.action || '';
-    var baseUrl = Api._urlFor(action);
-
-    // 🔑 GET с параметрами в URL — самый надёжный способ для Apps Script
-    var url = baseUrl + '?' + new URLSearchParams(
-        Object.assign({}, params, { _: Date.now() })
-    ).toString();
-
-    return new Promise(function(resolve, reject) {
-        var controller = new AbortController();
-        var timer = setTimeout(function() { controller.abort(); reject(new Error('timeout')); }, timeout);
-
-        fetch(url, {
-            method: 'GET',
-            mode: 'cors',
-            redirect: 'follow',
-            signal: controller.signal
-        })
-        .then(function(res) {
-            clearTimeout(timer);
-            if (!res.ok) { reject(new Error('HTTP ' + res.status)); return; }
-            resolve(res);
-        })
-        .catch(function(e) { clearTimeout(timer); reject(e); });
-    });
-},
-
         _fetch: function(params, retries, timeout) {
             retries = (retries === undefined) ? Config.MAX_RETRIES : retries;
             timeout = timeout || Config.FETCH_TIMEOUT;
-
+            var url = Config.APPS_SCRIPT_URL + '?' + new URLSearchParams(
+                Object.assign({}, params, { _: Date.now() })
+            ).toString();
             var self = this;
             var attempt = 0;
             function tryOnce() {
-                return self._fetchPost(params, timeout)
+                return self._fetchWithTimeout(url, timeout)
                     .then(function(res) { return res.json(); })
                     .catch(function(e) {
-                        if (attempt >= retries) return null;
+                        if (attempt >= retries) { return null; }
                         attempt++;
                         return new Promise(function(r) { setTimeout(r, 400); }).then(tryOnce);
                     });
             }
             return tryOnce();
         },
-
         ping: function() { return Api._fetch({ action: 'ping' }, 0, 5000); },
-
         getBootstrap: function() {
             if (State.bootstrapInFlight) return State.bootstrapInFlight;
             State.bootstrapInFlight = Api._fetch({ action: 'getBootstrap' }, 2, 25000).then(function(r) {
@@ -236,17 +199,15 @@
             });
             return State.bootstrapInFlight;
         },
-
         getAll: function() { return Api._fetch({ action: 'getAll' }); },
-        createRecord: function(data) {
-            return Api._fetch(Object.assign({ action: 'new' }, data), 0, Config.FETCH_TIMEOUT_WRITE);
-        },
+        // createRecord/delete/move/saveExtra — без retry (устраняет дубли при timeout)
+        createRecord: function(data) { return Api._fetch(Object.assign({ action: 'new' }, data), 0, 20000); },
         deleteRecord: function(slotKey) { return Api._fetch({ action: 'delete', slotKey: slotKey }, 0, 20000); },
         moveRecord: function(oldKey, newKey, data) {
             return Api._fetch(Object.assign({ action: 'move', oldSlotKey: oldKey, newSlotKey: newKey }, data), 0, 20000);
         },
         saveExtra: function(slotKey, extraComment, rating, phone) {
-            return Api._fetch({ action: 'saveExtraComment', slotKey: slotKey, extraComment: extraComment, rating: rating, phone: phone }, 1, 20000);
+            return Api._fetch({ action: 'saveExtraComment', slotKey: slotKey, extraComment: extraComment, rating: rating, phone: phone }, 0, 20000);
         },
         saveExtraBatch: function(keys, extraComment, rating) {
             return Api._fetch({
@@ -296,6 +257,7 @@
             return out;
         },
 
+        // 🔑 formatPhone без зеркалирования
         formatPhone: function(value, cursorPos) {
             var digits = value.replace(/\D/g, '');
             if (digits.length > 0 && (digits[0] === '7' || digits[0] === '8')) {
@@ -456,9 +418,8 @@
             if (!btn) return;
             btn.disabled = loading;
             var textEl = textId ? UI.$(textId) : btn;
-            if (!textEl) textEl = btn;  // 🔑 fallback
             if (loading) {
-                if (!btn.dataset.originalText) btn.dataset.originalText = textEl.textContent || '';
+                if (!btn.dataset.originalText) btn.dataset.originalText = textEl.textContent;
                 textEl.innerHTML = '<span class="spinner"></span> ' + (loadingText || 'Загрузка...');
             } else {
                 if (btn.dataset.originalText) textEl.textContent = btn.dataset.originalText;
@@ -755,6 +716,7 @@
             submitEl.disabled = !ready;
         },
 
+        // 🔑 ГЛАВНОЕ ИСПРАВЛЕНИЕ — submitInFlight всегда снимается
         submit: function() {
             var phone = UI.$('phone').value.trim();
             if (phone.replace(/\D/g, '').length < 11) { UI.toast('Введите корректный телефон', 'error'); return; }
@@ -791,6 +753,7 @@
                 return;
             }
 
+            // Чистим зависшие optimistic
             var now = Date.now();
             Object.keys(State.occupiedSlots).forEach(function(k) {
                 var rec = State.occupiedSlots[k];
@@ -799,11 +762,14 @@
                 }
             });
 
+            // 🔑 Флаг выставляем
             State.submitInFlight[slotKey] = true;
+
             var submitBtn = UI.$('submitBtn');
             submitBtn.disabled = true;
             UI.setLoading('submitBtn', true, 'submitText', 'Запись...');
 
+            // 🔑 Оптимистичный UI
             State.occupiedSlots[slotKey] = {
                 services: State.selectedServices.slice(),
                 size: payload.size,
@@ -827,18 +793,25 @@
             submitBtn.disabled = false;
             UI.setLoading('submitBtn', false);
 
+            // 🔑 Отправка
             Api.createRecord(payload).then(function(res) {
+                // 🔑 ГЛАВНОЕ: снимаем флаг ВСЕГДА
                 delete State.submitInFlight[slotKey];
 
+                // Случай A: timeout — НЕ откатываем, ждём bootstrap
                 if (res === null) {
                     UI.toast('Сохранение в процессе...', 'info', 2500);
+                    // Один отложенный bootstrap через 15 сек
                     setTimeout(function() {
-                        if (State.occupiedSlots[slotKey] && State.occupiedSlots[slotKey]._optimistic) {
+                        var rec = State.occupiedSlots[slotKey];
+                        if (rec && rec._optimistic) {
                             App.bootstrap();
                         }
-                    }, 15000);
+                    }, Config.VERIFY_DELAY);
                     return;
                 }
+
+                // Случай B: серверная ошибка (слот занят, невалид)
                 if (res.error) {
                     delete State.occupiedSlots[slotKey];
                     App.removeClientByKey(slotKey);
@@ -851,6 +824,8 @@
                     UI.toast(res.error, 'error', 5000);
                     return;
                 }
+
+                // Случай C: успех
                 if (res.ok && res.slotKey && res.record) {
                     if (res.slotKey !== slotKey) {
                         delete State.occupiedSlots[slotKey];
@@ -871,13 +846,15 @@
                     App.bootstrap();
                 }
             }).catch(function() {
+                // 🔑 В catch — тоже снимаем флаг
                 delete State.submitInFlight[slotKey];
                 UI.toast('Сохранение в процессе...', 'info', 2500);
                 setTimeout(function() {
-                    if (State.occupiedSlots[slotKey] && State.occupiedSlots[slotKey]._optimistic) {
+                    var rec = State.occupiedSlots[slotKey];
+                    if (rec && rec._optimistic) {
                         App.bootstrap();
                     }
-                }, 15000);
+                }, Config.VERIFY_DELAY);
             });
         },
 
@@ -1710,7 +1687,7 @@
                             cash: JSON.stringify(d.cash),
                             advances: JSON.stringify(d.advances)
                         });
-                        try { navigator.sendBeacon(Config.APPS_SCRIPT_URL_WRITE, params); } catch (e) {}
+                        try { navigator.sendBeacon(Config.APPS_SCRIPT_URL, params); } catch (e) {}
                     }
                 }
             });
@@ -2575,7 +2552,7 @@
                         State.salaryMonthLoadedKey = null;
                         SalaryCache.clearAll();
                         Zarp.loadAndRender(true);
-                    } else UI.toast((res && res.error) || 'Ошибка', 'error');
+                    } else UI.toast('Ошибка', 'error');
                 });
             });
             UI.$('addMarkBtn').addEventListener('click', Zarp.openMarkModal);
@@ -2889,7 +2866,7 @@
                         State.salaryMonthLoadedKey = null;
                         SalaryCache.clear(State.zarpYear + '_' + State.zarpMonth);
                         Zarp.loadAndRender(true);
-                    } else UI.toast((res && res.error) || 'Ошибка', 'error');
+                    } else UI.toast('Ошибка', 'error');
                 });
             });
         },
@@ -3335,7 +3312,7 @@
 
             document.addEventListener('visibilitychange', function() {
                 if (!document.hidden && !State.isUpdating) {
-                    if (Date.now() - State.lastBootstrapAt > 90000) App.bootstrap();
+                    if (Date.now() - State.lastBootstrapAt > 180000) App.bootstrap();
                 }
             });
 
@@ -3365,7 +3342,11 @@
             State.tetradkaDate = new Date().toISOString().slice(0, 10);
 
             setTimeout(function() { Api.ping(); }, 500);
+            setInterval(function() {
+                if (!document.hidden) Api.ping();
+            }, 300000);
 
+            // Чистка зависших optimistic
             setInterval(function() {
                 var now = Date.now();
                 var had = false;
@@ -3385,11 +3366,20 @@
 
             App.bootstrap();
 
+            // 🔑 Bootstrap реже + пропуск при активной optimistic
             setInterval(function() {
-                if (document.hidden) return;
-                if (State.isUpdating) return;
-                if (Tetradka._hasChanges) return;
-                if (Date.now() - State.lastBootstrapAt < Config.BOOTSTRAP_MIN_INTERVAL) return;
+                if (State.isUpdating || document.hidden || Tetradka._hasChanges) return;
+
+                var hasOptimistic = false;
+                var now = Date.now();
+                Object.keys(State.occupiedSlots).forEach(function(k) {
+                    var rec = State.occupiedSlots[k];
+                    if (rec._optimistic && (now - (rec._optimisticAt || 0)) < Config.OPTIMISTIC_TTL) {
+                        hasOptimistic = true;
+                    }
+                });
+                if (hasOptimistic) return;
+
                 State.isUpdating = true;
                 App.bootstrap().then(function() { State.isUpdating = false; });
             }, Config.REFRESH_INTERVAL);
