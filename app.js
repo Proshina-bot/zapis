@@ -1665,56 +1665,83 @@
             setInterval(function() { Tetradka.updateSaveStatus(); }, 10000);
         },
 
-        refreshRecordsOnly: function(btn) {
-            if (Tetradka._refreshingRecords) return;
-            var d = Tetradka.getCurrent();
-            if (!d) return;
-            Tetradka._refreshingRecords = true;
-            var originalText = btn.textContent;
-            btn.textContent = '⏳';
-            btn.disabled = true;
+       refreshRecordsOnly: function(btn) {
+    if (Tetradka._refreshingRecords) return;
+    var d = Tetradka.getCurrent();
+    if (!d) return;
+    Tetradka._refreshingRecords = true;
+    var originalText = btn.textContent;
+    btn.textContent = '⏳';
+    btn.disabled = true;
 
-            Api.getSalaryDay(d.date, d.branch).then(function(res) {
-                if (res && !res.error) {
-                    var savedCars = d.cars;
-                    var savedAdvances = d.advances;
-                    var savedCash = d.cash;
-                    var savedMastersOnShift = d.mastersOnShift;
-                    var savedServices = d.services;
-                    var savedPump = d.pump;
+    // 🔑 Два параллельных запроса: свежие записи CRM + данные Тетрадки
+    Promise.all([
+        Api.getBootstrap(),              // ← свежие записи из Sheet1
+        Api.getSalaryDay(d.date, d.branch) // ← свежие данные Тетрадки
+    ]).then(function(results) {
+        var bootstrapData = results[0];
+        var res = results[1];
 
-                    Tetradka.applyServerData(d.branch, d.date, res);
+        // 1. Обновляем State.occupiedSlots (записи CRM из Sheet1)
+        if (bootstrapData && !bootstrapData.error) {
+            App.applyBootstrap(bootstrapData);
+        }
 
-                    var newD = State.tetradka[d.branch];
-                    if (newD) {
-                        newD.cars = savedCars;
-                        newD.advances = savedAdvances;
-                        newD.cash = savedCash;
-                        newD.mastersOnShift = savedMastersOnShift;
-                        newD.services = savedServices;
-                        if (savedPump) newD.pump = savedPump;
-                        newD.records = Tetradka.getRecordsForDate(d.date, d.branch);
-                        var freshCars = (res.cars || []);
-                        newD.records.forEach(function(rec) {
-                            var linked = freshCars.find(function(c) { return c.recordKey === rec.key; });
-                            if (linked && linked.recordStatus) rec.status = linked.recordStatus;
-                        });
-                    }
-                    Tetradka.renderAll();
-                    UI.toast('Записи обновлены', 'success', 1500);
-                } else {
-                    UI.toast('Не удалось обновить', 'error');
-                }
-                Tetradka._refreshingRecords = false;
-                btn.textContent = originalText;
-                btn.disabled = false;
-            }).catch(function() {
-                Tetradka._refreshingRecords = false;
-                btn.textContent = originalText;
-                btn.disabled = false;
-                UI.toast('Ошибка обновления', 'error');
-            });
-        },
+        if (res && !res.error) {
+            // 2. Сохраняем локальные правки Тетрадки
+            var savedCars = d.cars;
+            var savedAdvances = d.advances;
+            var savedCash = d.cash;
+            var savedMastersOnShift = d.mastersOnShift;
+            var savedServices = d.services;
+            var savedPump = d.pump;
+
+            // 3. Применяем серверные данные Тетрадки
+            Tetradka.applyServerData(d.branch, d.date, res);
+
+            var newD = State.tetradka[d.branch];
+            if (newD) {
+                newD.cars = savedCars;
+                newD.advances = savedAdvances;
+                newD.cash = savedCash;
+                newD.mastersOnShift = savedMastersOnShift;
+                newD.services = savedServices;
+                if (savedPump) newD.pump = savedPump;
+
+                // 🔑 Пересобираем «Записи на сегодня» из СВЕЖИХ occupiedSlots
+                newD.records = Tetradka.getRecordsForDate(d.date, d.branch);
+
+                // Синхронизируем статусы ✓/✕
+                var freshCars = (res.cars || []);
+                newD.records.forEach(function(rec) {
+                    var linked = freshCars.find(function(c) { return c.recordKey === rec.key; });
+                    if (linked && linked.recordStatus) rec.status = linked.recordStatus;
+                });
+            }
+
+            Tetradka.renderAll();
+            // Обновляем и другие вкладки (журнал, база клиентов, слоты в Новой записи)
+            NewRecord.renderSlots();
+            Journal.invalidate();
+            Clients.invalidate();
+            Journal.render();
+            Clients.render();
+
+            UI.toast('Записи обновлены', 'success', 1500);
+        } else {
+            UI.toast('Не удалось обновить', 'error');
+        }
+
+        Tetradka._refreshingRecords = false;
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }).catch(function() {
+        Tetradka._refreshingRecords = false;
+        btn.textContent = originalText;
+        btn.disabled = false;
+        UI.toast('Ошибка обновления', 'error');
+    });
+},
 
         fullRefresh: function(btn) {
             if (Tetradka._refreshingFull) return;
