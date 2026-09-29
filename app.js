@@ -264,17 +264,12 @@
         },
         // 🔑 formatPhone сохраняет курсор
 formatPhone: function(value, cursorPos) {
-    // 1. Только цифры
     var digits = value.replace(/\D/g, '');
-
-    // 2. Убираем ведущую 7/8 (код страны)
     if (digits.length > 0 && (digits[0] === '7' || digits[0] === '8')) {
         digits = digits.substring(1);
     }
-    // 3. Максимум 10 цифр
     digits = digits.substring(0, 10);
 
-    // 4. Собираем строку
     var result = '+7';
     if (digits.length > 0) {
         result += ' (' + digits.substring(0, 3);
@@ -291,30 +286,21 @@ formatPhone: function(value, cursorPos) {
         result += ' (';
     }
 
-    // 5. Восстановление курсора
-    // Считаем, сколько ЦИФР было в старом значении слева от курсора
-    // (без учёта ведущей 7, которую мы отбрасываем)
     var cursor = cursorPos === undefined ? value.length : cursorPos;
     var digitsBefore = value.substring(0, cursor).replace(/\D/g, '');
-    // Отрезаем ведущую 7 если она была в старом значении
     if (digitsBefore.length > 0 && (digitsBefore[0] === '7' || digitsBefore[0] === '8')) {
         digitsBefore = digitsBefore.substring(1);
     }
     var digitCount = digitsBefore.length;
 
-    // Ищем позицию в новом результате, где окажется digitCount цифр (не считая +7)
     var newPos = result.length;
-    if (digitCount === 0) {
-        // Курсор после "("
-        newPos = result.length;
-    } else {
+    if (digitCount > 0) {
         var seen = 0;
         var skipLeading7 = true;
         for (var i = 0; i < result.length; i++) {
             var ch = result[i];
             if (/\d/.test(ch)) {
                 if (skipLeading7 && ch === '7') {
-                    // Пропускаем только первую 7 (код страны)
                     skipLeading7 = false;
                     continue;
                 }
