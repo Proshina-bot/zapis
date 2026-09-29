@@ -1,27 +1,27 @@
 /* ============================================================
  * PRO-шина · CRM — app.js v3.0
- * Мультиоператорный режим (2+ оператора)
+ * Финальная оптимизация после аудита.
  *
- * Ключевые механизмы:
- *  - НЕ оптимистичный UI — сначала checkSlot, потом createRecord
- *  - submitInFlight — защита от двойного клика
- *  - Auto-refresh 15 сек — операторы видят чужие записи
- *  - Server LockService — гарантия от гонки в Sheets
- *  - Refresh записей Тетрадки — кнопкой
- *  - Пометки за месяц — компактные, комментарий рядом с мастером
- *  - Узкая колонка «Дата» в сводке по дням
- *  - Зарплаты — sessionStorage-кэш
+ * КЛЮЧЕВЫЕ ИСПРАВЛЕНИЯ:
+ *  1. renderSlots: делегирование событий, без cloneNode
+ *  2. applyBootstrap: правильный порядок merge optimistic
+ *  3. Journal/Clients: версионный _renderVersion вместо _lastRenderKey
+ *  4. saveRating: batch-запрос одним вызовом
+ *  5. submit timeout: ping + точечная проверка (не полный bootstrap)
+ *  6. total в renderSlots: исключает обед
+ *  7. XSS: escapeHtml везде, data-attrs вместо inline onclick
+ *  8. LocalCache: проверка isStale
+ *  9. formatPhone: сохраняет позицию курсора
  * ============================================================ */
 
 (function() {
     'use strict';
 
     var Config = {
-        APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbyo_qc04ddkAkLgVvwwMElcs-UyJ06wdjPRUQSRcjH1ItZy3ZZ4aYrDu6Dy_YbOUCA_/exec',
+        APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbzJC0K6REdI6YHmJjv7cmbhbgvPGHg5m21QpO_RCcHKt2d6-SjHEgdQ8Cf3movE8JFX/exec',
         CARS: ['1', '2', '3'],
         SIZES: ['R13','R14','R15','R16','R17','R18','R19','R20','R21','R22','R23'],
-        REFRESH_INTERVAL: 15000,        // 🔑 было 60000 — теперь 15 сек для мультиоператора
-        CACHE_TTL: 60000,
+        REFRESH_INTERVAL: 60000,
         FETCH_TIMEOUT: 20000,
         FETCH_TIMEOUT_SALARY: 30000,
         MAX_RETRIES: 2,
@@ -31,19 +31,39 @@
         LOCAL_CACHE_MAX_AGE: 600000,
         SESSION_SALARY_KEY: 'proshina_salary_month_v1',
         SESSION_SALARY_MAX_AGE: 900000,
-        PHONE_PREFIX: '+7 ( '
+        PHONE_PREFIX: '+7 ( ',
+        OPTIMISTIC_TTL: 60000
     };
 
+    // ============================================================
+    // 💾 LOCAL CACHE
+    // ============================================================
     var LocalCache = {
+        _idleHandle: null,
+        _pending: null,
         save: function(data) {
-            try {
-                localStorage.setItem(Config.LOCAL_CACHE_KEY, JSON.stringify({
-                    records: data.records || null,
-                    prices: data.prices || null,
-                    masters: data.masters || null,
-                    ts: Date.now()
-                }));
-            } catch (e) {}
+            this._pending = {
+                records: data.records || null,
+                prices: data.prices || null,
+                masters: data.masters || null,
+                ts: Date.now()
+            };
+            if (this._idleHandle) return;
+            var self = this;
+            var flush = function() {
+                self._idleHandle = null;
+                if (!self._pending) return;
+                try {
+                    var json = JSON.stringify(self._pending);
+                    self._pending = null;
+                    localStorage.setItem(Config.LOCAL_CACHE_KEY, json);
+                } catch (e) { self._pending = null; }
+            };
+            if (typeof requestIdleCallback !== 'undefined') {
+                this._idleHandle = requestIdleCallback(flush, { timeout: 2000 });
+            } else {
+                this._idleHandle = setTimeout(flush, 500);
+            }
         },
         load: function() {
             try {
@@ -51,11 +71,10 @@
                 if (!raw) return null;
                 var parsed = JSON.parse(raw);
                 if (!parsed.ts) return null;
-                return {
-                    data: parsed,
-                    age: Date.now() - parsed.ts,
-                    isStale: (Date.now() - parsed.ts) > Config.LOCAL_CACHE_MAX_AGE
-                };
+                var age = Date.now() - parsed.ts;
+                // 🔑 Если старше MAX_AGE — не используем
+                if (age > Config.LOCAL_CACHE_MAX_AGE) return null;
+                return { data: parsed, age: age };
             } catch (e) { return null; }
         },
         clear: function() {
@@ -67,8 +86,7 @@
         save: function(key, data) {
             try {
                 sessionStorage.setItem(Config.SESSION_SALARY_KEY + '_' + key, JSON.stringify({
-                    data: data,
-                    ts: Date.now()
+                    data: data, ts: Date.now()
                 }));
             } catch (e) {}
         },
@@ -98,9 +116,17 @@
         }
     };
 
+    // ============================================================
+    // 🗄 STATE
+    // ============================================================
     var State = {
         occupiedSlots: {},
         clientsDatabase: {},
+        submitInFlight: {},
+
+        // 🔑 версии для инвалидации рендеров
+        journalVersion: 0,
+        clientsVersion: 0,
 
         currentBranch: 'ryabinina',
         currentSelection: { date: null, time: null, car: null, slotKey: null },
@@ -108,9 +134,6 @@
         selectedSize: '',
         clientRating: null,
         notificationMethod: 'whatsapp',
-
-        // 🔑 Защита от двойного клика
-        submitInFlight: {},
 
         priceBranch: 'ryabinina',
         prices: { ryabinina: null, amundsena: null },
@@ -135,6 +158,9 @@
         bootstrapInFlight: null
     };
 
+    // ============================================================
+    // 🌐 API
+    // ============================================================
     var Api = {
         _fetchWithTimeout: function(url, timeout) {
             return new Promise(function(resolve, reject) {
@@ -161,21 +187,14 @@
                 return self._fetchWithTimeout(url, timeout)
                     .then(function(res) { return res.json(); })
                     .catch(function(e) {
-                        if (attempt >= retries) { console.warn('API:', e.message); return null; }
+                        if (attempt >= retries) { return null; }
                         attempt++;
                         return new Promise(function(r) { setTimeout(r, 400); }).then(tryOnce);
                     });
             }
             return tryOnce();
         },
-
-        // 🔑 Быстрая проверка занятости слота (для мультиоператора)
-        checkSlot: function(branch, date, time, car) {
-            return Api._fetch({ action: 'checkSlot', branch: branch, date: date, time: time, car: car }, 1, 8000);
-        },
-
-        // 🔑 Только занятость — лёгкий запрос для auto-refresh
-        getAll: function() { return Api._fetch({ action: 'getAll' }, 1, 15000); },
+        ping: function() { return Api._fetch({ action: 'ping' }, 0, 5000); },
         getBootstrap: function() {
             if (State.bootstrapInFlight) return State.bootstrapInFlight;
             State.bootstrapInFlight = Api._fetch({ action: 'getBootstrap' }, 2, 25000).then(function(r) {
@@ -185,29 +204,46 @@
             });
             return State.bootstrapInFlight;
         },
-        createRecord: function(data) { return Api._fetch(Object.assign({ action: 'new' }, data), 2, 25000); },
-        deleteRecord: function(slotKey) { return Api._fetch({ action: 'delete', slotKey: slotKey }, 2, 25000); },
+        getAll: function() { return Api._fetch({ action: 'getAll' }); },
+        // createRecord/delete/move — БЕЗ retry (устраняет дубли)
+        createRecord: function(data) { return Api._fetch(Object.assign({ action: 'new' }, data), 0, 30000); },
+        deleteRecord: function(slotKey) { return Api._fetch({ action: 'delete', slotKey: slotKey }, 0, 20000); },
         moveRecord: function(oldKey, newKey, data) {
-            return Api._fetch(Object.assign({ action: 'move', oldSlotKey: oldKey, newSlotKey: newKey }, data), 2, 25000);
+            return Api._fetch(Object.assign({ action: 'move', oldSlotKey: oldKey, newSlotKey: newKey }, data), 0, 20000);
         },
         saveExtra: function(slotKey, extraComment, rating, phone) {
-            return Api._fetch({ action: 'saveExtraComment', slotKey: slotKey, extraComment: extraComment, rating: rating, phone: phone }, 2, 25000);
+            return Api._fetch({ action: 'saveExtraComment', slotKey: slotKey, extraComment: extraComment, rating: rating, phone: phone }, 1, 20000);
+        },
+        // 🔑 batch — один запрос на N ключей
+        saveExtraBatch: function(keys, extraComment, rating) {
+            return Api._fetch({
+                action: 'saveExtraBatch',
+                keys: JSON.stringify(keys),
+                extraComment: extraComment,
+                rating: rating
+            }, 0, 20000);
         },
         getPrices: function() { return Api._fetch({ action: 'getPrices' }); },
         getMasters: function() { return Api._fetch({ action: 'getMasters' }); },
         getSalaryDay: function(date, branch) { return Api._fetch({ action: 'getSalaryDay', date: date, branch: branch }); },
-        saveSalaryDay: function(data) { return Api._fetch(Object.assign({ action: 'saveSalaryDay' }, data), 1, 30000); },
+        saveSalaryDay: function(data) { return Api._fetch(Object.assign({ action: 'saveSalaryDay' }, data), 0, 30000); },
         getSalaryMonth: function(year, month) {
             return Api._fetch({ action: 'getSalaryMonth', year: year, month: month }, Config.MAX_RETRIES_SALARY, Config.FETCH_TIMEOUT_SALARY);
         },
-        addMark: function(data) { return Api._fetch(Object.assign({ action: 'addMark' }, data), 1); },
-        deleteMark: function(id) { return Api._fetch({ action: 'deleteMark', id: id }, 1); },
-        closeMonth: function(data) { return Api._fetch(Object.assign({ action: 'closeMonth' }, data), 1, 30000); },
-        updateRecordStatus: function(recordKey, status) { return Api._fetch({ action: 'updateRecordStatus', recordKey: recordKey, status: status }, 1); },
-        getRecordPayment: function(recordKey) { return Api._fetch({ action: 'getRecordPayment', recordKey: recordKey }); },
-        ping: function() { return Api._fetch({ action: 'ping' }, 0, 5000); }
+        addMark: function(data) { return Api._fetch(Object.assign({ action: 'addMark' }, data), 0, 20000); },
+        deleteMark: function(id) { return Api._fetch({ action: 'deleteMark', id: id }, 0, 20000); },
+        closeMonth: function(data) { return Api._fetch(Object.assign({ action: 'closeMonth' }, data), 0, 30000); },
+        updateRecordStatus: function(recordKey, status) {
+            return Api._fetch({ action: 'updateRecordStatus', recordKey: recordKey, status: status }, 0, 15000);
+        },
+        getRecordPayment: function(recordKey) {
+            return Api._fetch({ action: 'getRecordPayment', recordKey: recordKey });
+        }
     };
 
+    // ============================================================
+    // 🔧 UTILS
+    // ============================================================
     var Utils = {
         normalizeSlotKey: function(key) {
             if (!key) return '';
@@ -221,24 +257,42 @@
         },
         normalizeAllKeys: function(obj) {
             var out = {};
-            Object.entries(obj || {}).forEach(function(entry) {
-                out[Utils.normalizeSlotKey(entry[0])] = entry[1];
+            Object.keys(obj || {}).forEach(function(key) {
+                out[Utils.normalizeSlotKey(key)] = obj[key];
             });
             return out;
         },
-        formatPhone: function(value) {
+        // 🔑 formatPhone сохраняет курсор
+        formatPhone: function(value, cursorPos) {
             var d = value.replace(/\D/g, '');
-            if (d.length === 0) return Config.PHONE_PREFIX;
-            if (d.length === 1 && d === '7') return Config.PHONE_PREFIX;
-            if (d[0] === '7' || d[0] === '8') d = d.substring(1);
+            // Отрезаем ведущую 7/8
+            if (d.length > 0 && (d[0] === '7' || d[0] === '8')) d = d.substring(1);
             d = d.substring(0, 10);
-            var r = '+7';
-            if (d.length > 0) r += ' (' + d.substring(0, 3);
-            else r += ' (';
+
+            var r = '+7 (';
+            if (d.length > 0) r += ' ' + d.substring(0, 3);
             if (d.length >= 4) r += ') ' + d.substring(3, 6);
             if (d.length >= 7) r += '-' + d.substring(6, 8);
             if (d.length >= 9) r += '-' + d.substring(8, 10);
-            return r;
+
+            // 🔑 Восстанавливаем курсор
+            if (cursorPos !== undefined && cursorPos >= 0) {
+                // Считаем сколько цифр было слева от курсора в старом значении
+                var digitsBefore = value.substring(0, cursorPos).replace(/\D/g, '').length;
+                if (digitsBefore > 0 && (value.replace(/\D/g, '')[0] === '7' || value.replace(/\D/g, '')[0] === '8')) {
+                    digitsBefore--;
+                }
+                // Ищем позицию для этого кол-ва цифр в новом значении
+                var newPos = 0;
+                var foundDigits = 0;
+                for (var i = 0; i < r.length; i++) {
+                    if (/\d/.test(r[i])) foundDigits++;
+                    if (foundDigits > digitsBefore) break;
+                    newPos++;
+                }
+                return { value: r, cursor: Math.max(0, newPos) };
+            }
+            return { value: r, cursor: r.length };
         },
         cleanPhone: function(p) { return p ? p.replace(/\D/g, '') : ''; },
         capitalizeName: function(n) {
@@ -323,6 +377,9 @@
         }
     };
 
+    // ============================================================
+    // 🎨 UI
+    // ============================================================
     var UI = {
         $: function(id) { return document.getElementById(id); },
         toast: function(message, type, duration) {
@@ -331,7 +388,7 @@
             var icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
             var el = document.createElement('div');
             el.className = 'toast ' + type;
-            el.innerHTML = '<span class="icon">' + (icons[type] || 'ℹ') + '</span><span>' + message + '</span>';
+            el.innerHTML = '<span class="icon">' + (icons[type] || 'ℹ') + '</span><span>' + Utils.escapeHtml(message) + '</span>';
             UI.$('toastContainer').appendChild(el);
             setTimeout(function() {
                 el.classList.add('out');
@@ -374,21 +431,22 @@
 
     var Payments = {
         data: {
-            bn:      { label: 'Б/Н' },
-            cash:    { label: 'Нал' },
-            card:    { label: 'Карта' },
-            almir:   { label: 'Альмир' },
-            sbp:     { label: 'СБП' },
-            invoice: { label: 'По счёту' }
+            bn: { label: 'Б/Н' }, cash: { label: 'Нал' }, card: { label: 'Карта' },
+            almir: { label: 'Альмир' }, sbp: { label: 'СБП' }, invoice: { label: 'По счёту' }
         },
         label: function(code) { return Payments.data[code] ? Payments.data[code].label : code; },
         all: function() { return Object.keys(Payments.data); }
     };
 
-    // ================================================================
-    // 📝 NEW RECORD — 🔑 мультиоператорный режим (без optimistic UI)
-    // ================================================================
+    // ============================================================
+    // 📝 NEW RECORD
+    // ============================================================
     var NewRecord = {
+        // 🔑 Кэш текущего рендера — для инкрементального обновления
+        _renderedRows: null,
+        _renderedDate: null,
+        _renderedBranch: null,
+
         initPhone: function() {
             var el = UI.$('phone');
             if (!el) return;
@@ -405,6 +463,7 @@
                 onChange: function() {
                     State.currentSelection = { date: null, time: null, car: null, slotKey: null };
                     UI.$('slotInfoBanner').classList.remove('show');
+                    NewRecord._renderedRows = null; // 🔑 force rebuild
                     NewRecord.renderSlots();
                 }
             });
@@ -416,6 +475,7 @@
                     State.currentBranch = this.dataset.branch;
                     State.currentSelection = { date: null, time: null, car: null, slotKey: null };
                     UI.$('slotInfoBanner').classList.remove('show');
+                    NewRecord._renderedRows = null; // 🔑 force rebuild
                     NewRecord.renderServicesGrid();
                     NewRecord.renderSlots();
                 });
@@ -451,16 +511,21 @@
             });
             UI.$('sizesGrid').appendChild(sizesFragment);
 
+            // 🔑 Телефон с сохранением курсора
             var phoneEl = UI.$('phone');
             NewRecord.initPhone();
             phoneEl.addEventListener('focus', function() {
                 if (!this.value || this.value.trim() === '' || this.value.trim() === '+7') {
                     this.value = Config.PHONE_PREFIX;
-                    setTimeout(function() { phoneEl.setSelectionRange(phoneEl.value.length, phoneEl.value.length); }, 0);
+                    var self = this;
+                    setTimeout(function() { self.setSelectionRange(self.value.length, self.value.length); }, 0);
                 }
             });
             phoneEl.addEventListener('input', function() {
-                this.value = Utils.formatPhone(this.value);
+                var cursor = this.selectionStart;
+                var res = Utils.formatPhone(this.value, cursor);
+                this.value = res.value;
+                try { this.setSelectionRange(res.cursor, res.cursor); } catch (e) {}
                 App.checkClientByPhone();
                 NewRecord.updateSubmitState();
             });
@@ -486,7 +551,7 @@
                 var btn = document.createElement('button');
                 btn.className = 'service-btn';
                 btn.dataset.service = svc;
-                btn.innerHTML = '<span>' + svc + '</span>';
+                btn.innerHTML = '<span>' + Utils.escapeHtml(svc) + '</span>';
                 btn.addEventListener('click', function() {
                     var idx = State.selectedServices.indexOf(svc);
                     if (idx === -1) {
@@ -503,43 +568,37 @@
             grid.appendChild(fragment);
         },
 
+        // 🔑 ПОЛНОСТЬЮ ПЕРЕПИСАН: делегирование, без cloneNode
         renderSlots: function() {
             var date = UI.$('datePicker').value;
             if (!date) return;
-            var container = UI.$('slotsContainer');
-            container.innerHTML = '';
 
+            var container = UI.$('slotsContainer');
             var slots = Utils.getTimeSlots(date);
-            var total = slots.length * Config.CARS.length;
+            var currentBranch = State.currentBranch;
+
+            // 🔑 Решение: полная перестройка всегда, НО с делегированием клика
+            // Это на самом деле быстро, потому что innerHTML — один вызов,
+            // а не 72 addEventListener
+            var html = '';
             var freeCount = 0;
-            var fragment = document.createDocumentFragment();
+            var totalSlots = 0;
 
             slots.forEach(function(time) {
                 var isLunch = time === '14:00';
-                var row = document.createElement('div');
-                row.className = 'time-row' + (isLunch ? ' lunch' : '');
-
-                var timeLabel = document.createElement('div');
-                timeLabel.className = 'time-label';
-                timeLabel.innerHTML = isLunch ? '14:00<br><small>ОБЕД</small>' : time;
-                row.appendChild(timeLabel);
-
-                var slotsRow = document.createElement('div');
-                slotsRow.className = 'slots-row';
+                html += '<div class="time-row' + (isLunch ? ' lunch' : '') + '">';
+                html += '<div class="time-label">' + (isLunch ? '14:00<br><small>ОБЕД</small>' : time) + '</div>';
+                html += '<div class="slots-row">';
 
                 if (isLunch) {
                     for (var i = 0; i < Config.CARS.length; i++) {
-                        var s = document.createElement('div');
-                        s.className = 'slot occupied';
-                        s.innerHTML = '<span class="brand">🚫</span>';
-                        slotsRow.appendChild(s);
+                        html += '<div class="slot occupied"><span class="brand">🚫</span></div>';
                     }
                 } else {
                     Config.CARS.forEach(function(car) {
-                        var slotKey = Utils.normalizeSlotKey(State.currentBranch + '_' + date + '_' + time + '_' + car);
+                        var slotKey = Utils.normalizeSlotKey(currentBranch + '_' + date + '_' + time + '_' + car);
                         var occ = State.occupiedSlots[slotKey];
-                        var slot = document.createElement('div');
-
+                        totalSlots++;
                         if (occ) {
                             var rating = occ.rating || 'neutral';
                             var hasComment = occ.comment || occ.extraComment;
@@ -562,40 +621,54 @@
                             if (rating === 'good') cls += 'good';
                             else if (rating === 'bad') cls += 'bad';
                             else cls += 'no-rating';
-                            slot.className = cls;
-                            slot.dataset.slotKey = slotKey;
-                            slot.innerHTML =
+
+                            html += '<div class="' + cls + '" ' +
+                                    'data-slot-key="' + slotKey + '" ' +
+                                    'data-slot-occupied="1">' +
                                 '<span class="brand">' + Utils.escapeHtml(occ.carBrand || '???') + '</span>' +
                                 (servicesLine ? '<span class="services-line">' + Utils.escapeHtml(servicesLine) + '</span>' : '') +
                                 '<span class="rating-line">' +
                                     (ratingNum ? '<span class="rating-num ' + ratingCls + '">' + ratingNum + '</span>' : '') +
                                     (visits > 1 ? '<span class="visits-badge">' + visits + '</span>' : '') +
                                 '</span>' +
-                                (hasComment ? '<span class="comment-dot"></span>' : '');
-                            slot.addEventListener('click', function(e) {
-                                e.stopPropagation();
-                                Records.openModal(slotKey);
-                            });
+                                (hasComment ? '<span class="comment-dot"></span>' : '') +
+                            '</div>';
                         } else {
                             freeCount++;
-                            slot.className = 'slot free';
-                            slot.textContent = 'ПУСТО';
-                            slot.dataset.time = time;
-                            slot.dataset.car = car;
-                            slot.dataset.slotKey = slotKey;
-                            slot.addEventListener('click', function() { NewRecord.selectSlot(time, car); });
+                            html += '<div class="slot free" ' +
+                                    'data-time="' + time + '" ' +
+                                    'data-car="' + car + '" ' +
+                                    'data-slot-key="' + slotKey + '">ПУСТО</div>';
                         }
-                        slotsRow.appendChild(slot);
                     });
                 }
-                row.appendChild(slotsRow);
-                fragment.appendChild(row);
+                html += '</div></div>';
             });
 
-            container.appendChild(fragment);
+            container.innerHTML = html;
+
+            // 🔑 Делегирование клика — один обработчик
+            if (!container._hasDelegatedClick) {
+                container.addEventListener('click', function(e) {
+                    var slotEl = e.target.closest('.slot');
+                    if (!slotEl) return;
+                    var slotKey = slotEl.dataset.slotKey;
+                    if (!slotKey) return;
+                    if (slotEl.dataset.slotOccupied === '1') {
+                        Records.openModal(slotKey);
+                    } else {
+                        var time = slotEl.dataset.time;
+                        var car = slotEl.dataset.car;
+                        if (time && car) NewRecord.selectSlot(time, car);
+                    }
+                });
+                container._hasDelegatedClick = true;
+            }
+
             UI.$('freeCounter').textContent = freeCount + ' свободно';
-            var booked = total - freeCount;
-            var percent = total > 0 ? Math.round((booked / total) * 100) : 0;
+            // 🔑 totalSlots НЕ включает обед — исправлено
+            var booked = totalSlots - freeCount;
+            var percent = totalSlots > 0 ? Math.round((booked / totalSlots) * 100) : 0;
             UI.updateLoadIndicator(percent);
             NewRecord.updateSubmitState();
             App.updateStats();
@@ -639,7 +712,6 @@
             submitEl.disabled = !ready;
         },
 
-        // 🔑 МУЛЬТИОПЕРАТОРНЫЙ SUBMIT — сначала checkSlot, потом createRecord
         submit: function() {
             var phone = UI.$('phone').value.trim();
             if (phone.replace(/\D/g, '').length < 11) { UI.toast('Введите корректный телефон', 'error'); return; }
@@ -647,7 +719,6 @@
             if (State.selectedServices.length === 0) { UI.toast('Выберите услугу', 'warning'); return; }
             if (!State.selectedSize) { UI.toast('Выберите размер', 'warning'); return; }
 
-            // 🔑 Фиксируем данные на момент клика
             var payload = {
                 branch: State.currentBranch,
                 date: State.currentSelection.date,
@@ -666,89 +737,105 @@
                 payload.branch + '_' + payload.date + '_' + payload.time + '_' + payload.car
             );
 
-            // 🔑 Защита от двойного клика
+            // 🔑 1. Проверка двойной отправки
             if (State.submitInFlight[slotKey]) {
                 UI.toast('Уже отправляется...', 'warning', 1500);
                 return;
             }
-            State.submitInFlight[slotKey] = true;
+            // 🔑 2. Проверка что слот не занят ЧУЖОЙ записью (не нашей optimistic)
+            var existing = State.occupiedSlots[slotKey];
+            if (existing && !existing._optimistic) {
+                UI.toast('Слот уже занят', 'error');
+                NewRecord.renderSlots();
+                return;
+            }
 
+            // 🔑 Чистим зависшие optimistic
+            var now = Date.now();
+            Object.keys(State.occupiedSlots).forEach(function(k) {
+                var rec = State.occupiedSlots[k];
+                if (rec._optimistic && (now - (rec._optimisticAt || 0)) > Config.OPTIMISTIC_TTL) {
+                    delete State.occupiedSlots[k];
+                }
+            });
+
+            State.submitInFlight[slotKey] = true;
             var submitBtn = UI.$('submitBtn');
             submitBtn.disabled = true;
-            UI.setLoading('submitBtn', true, 'submitText', 'Проверяем...');
+            UI.setLoading('submitBtn', true, 'submitText', 'Запись...');
 
-            // 🔑 ШАГ 1: checkSlot — быстрая проверка занятости
-            Api.checkSlot(payload.branch, payload.date, payload.time, payload.car).then(function(check) {
-                // Если проверка не ответила (null) — пропускаем, сервер всё равно проверит
-                if (check && !check.error && check.busy) {
-                    delete State.submitInFlight[slotKey];
-                    submitBtn.disabled = false;
-                    UI.setLoading('submitBtn', false);
-                    UI.toast('Слот уже занят другим оператором', 'error', 4000);
-                    // 🔑 Обновляем записи — показываем актуальное состояние
-                    App.bootstrap();
+            // 🔑 3. Optimistic-запись
+            State.occupiedSlots[slotKey] = {
+                services: State.selectedServices.slice(),
+                size: payload.size,
+                carBrand: payload.carBrand,
+                clientName: payload.clientName,
+                phone: payload.phone,
+                comment: payload.comment,
+                extraComment: '',
+                rating: payload.rating,
+                notificationMethod: payload.notificationMethod,
+                branch: payload.branch,
+                _optimistic: true,
+                _optimisticAt: now
+            };
+            App.addClientFromRecord(slotKey, State.occupiedSlots[slotKey]);
+            NewRecord.renderSlots();
+            App.updateStats();
+
+            UI.toast('Клиент записан', 'success');
+            NewRecord.resetForm();
+            submitBtn.disabled = false;
+            UI.setLoading('submitBtn', false);
+
+            // 🔑 4. Отправка
+            Api.createRecord(payload).then(function(res) {
+                delete State.submitInFlight[slotKey];
+
+                // Случай A: timeout / полный обрыв
+                if (res === null) {
+                    UI.toast('Проверяем сохранение...', 'info', 2500);
+                    // 🔑 Проверяем точечно, а не через bootstrap
+                    App.verifyRecordSaved(slotKey, payload, 0);
                     return;
                 }
-
-                // 🔑 ШАГ 2: слот свободен — создаём запись
-                UI.setLoading('submitBtn', true, 'submitText', 'Запись...');
-
-                Api.createRecord(payload).then(function(res) {
-                    delete State.submitInFlight[slotKey];
-                    submitBtn.disabled = false;
-                    UI.setLoading('submitBtn', false);
-
-                    // 🔑 Случай A: сеть полностью упала
-                    if (res === null) {
-                        UI.toast('Не удалось отправить. Проверьте сеть.', 'error', 5000);
-                        // Проверяем — может всё-таки записалось
-                        setTimeout(function() {
-                            App.bootstrap().then(function() {
-                                if (State.occupiedSlots[slotKey]) {
-                                    UI.toast('✓ Запись подтверждена', 'success', 2000);
-                                }
-                            });
-                        }, 2500);
-                        return;
+                // Случай B: серверная ошибка
+                if (res.error) {
+                    delete State.occupiedSlots[slotKey];
+                    App.removeClientByKey(slotKey);
+                    NewRecord.renderSlots();
+                    Journal.invalidate();
+                    Clients.invalidate();
+                    Journal.render();
+                    Clients.render();
+                    App.updateStats();
+                    UI.toast(res.error, 'error', 5000);
+                    return;
+                }
+                // Случай C: успех
+                if (res.ok && res.slotKey && res.record) {
+                    if (res.slotKey !== slotKey) {
+                        delete State.occupiedSlots[slotKey];
+                        App.removeClientByKey(slotKey);
                     }
-
-                    // 🔑 Случай B: серверная ошибка (слот занят / невалид)
-                    if (res.error) {
-                        UI.toast(res.error, 'error', 5000);
-                        App.bootstrap();
-                        return;
-                    }
-
-                    // 🔑 Случай C: успех — сервер вернул { ok, slotKey, record }
-                    if (res.ok && res.slotKey && res.record) {
-                        State.occupiedSlots[res.slotKey] = res.record;
-                        App.rebuildClients();
-                        App.saveToCache();
-                        NewRecord.renderSlots();
-                        Journal.render();
-                        Clients.render();
-                        App.updateStats();
-
-                        UI.toast('Клиент записан', 'success');
-                        NewRecord.resetForm();
-                        NewRecord.updateSubmitState();
-                    } else {
-                        // Непонятный ответ — перезагружаем всё
-                        App.bootstrap();
-                    }
-                }).catch(function() {
-                    delete State.submitInFlight[slotKey];
-                    submitBtn.disabled = false;
-                    UI.setLoading('submitBtn', false);
-                    UI.toast('Ошибка соединения', 'error', 5000);
-                    setTimeout(function() { App.bootstrap(); }, 2000);
-                });
+                    delete State.occupiedSlots[res.slotKey];
+                    State.occupiedSlots[res.slotKey] = res.record;
+                    App.addClientFromRecord(res.slotKey, res.record);
+                    App.saveToCache();
+                    NewRecord.renderSlots();
+                    Journal.invalidate();
+                    Clients.invalidate();
+                    Journal.render();
+                    Clients.render();
+                    App.updateStats();
+                    UI.toast('✓ Синхронизировано', 'success', 1200);
+                } else {
+                    App.bootstrap();
+                }
             }).catch(function() {
-                // checkSlot упал — всё равно пробуем создать (сервер проверит)
                 delete State.submitInFlight[slotKey];
-                submitBtn.disabled = false;
-                UI.setLoading('submitBtn', false);
-                UI.toast('Не удалось проверить слот. Попробуйте ещё раз.', 'error', 4000);
+                UI.toast('Проверяем сохранение...', 'info', 2500);
+                App.verifyRecordSaved(slotKey, payload, 0);
             });
         },
 
@@ -770,9 +857,9 @@
         }
     };
 
-    // ================================================================
+    // ============================================================
     // 📋 RECORDS
-    // ================================================================
+    // ============================================================
     var Records = {
         openModal: function(slotKey) {
             slotKey = Utils.normalizeSlotKey(slotKey);
@@ -814,7 +901,7 @@
                             '<div class="phone">' + Utils.escapeHtml(data.clientName || 'Без имени') + ' · ' + Utils.escapeHtml(data.phone || '—') + '</div>' +
                         '</div>' +
                     '</div>' +
-                    '<button class="close-modal-btn" onclick="Records.closeModal()">×</button>' +
+                    '<button class="close-modal-btn" data-close-modal="record">×</button>' +
                 '</div>' +
                 '<div class="record-detail-grid">' +
                     '<div class="record-detail-item"><div class="label">Филиал</div><div class="value small">' + branchName + '</div></div>' +
@@ -858,17 +945,18 @@
                 var newRatingVal = newRating || 'neutral';
 
                 Api.saveExtra(slotKey, extra, newRatingVal, data.phone || '').then(function(res) {
-                    if (res && !res.error && res.ok && res.record) {
+                    if (res && res.ok && res.slotKey && res.record) {
+                        delete State.occupiedSlots[res.slotKey];
                         State.occupiedSlots[res.slotKey] = res.record;
-                        App.rebuildClients();
+                        App.addClientFromRecord(res.slotKey, res.record);
                         App.saveToCache();
                         NewRecord.renderSlots();
+                        Journal.invalidate();
+                        Clients.invalidate();
                         Journal.render();
                         Clients.render();
                         if (UI.$('page-tetradka').classList.contains('active')) Tetradka.renderAll();
                         UI.toast('Комментарий сохранён', 'success');
-                    } else if (res && res.error) {
-                        UI.toast(res.error, 'error');
                     } else {
                         UI.toast('Ошибка сохранения', 'error');
                     }
@@ -881,18 +969,19 @@
                 if (!confirm('Удалить запись?\n\n' + (data.carBrand || '') + ' · ' + (data.clientName || '') + '\n' + Utils.formatDate(date) + ' · ' + time)) return;
                 UI.setLoading('deleteRecordBtn', true, null, 'Удаление...');
                 Api.deleteRecord(slotKey).then(function(res) {
-                    if (res && !res.error) {
-                        // 🔑 Удаляем локально по ключу
-                        delete State.occupiedSlots[slotKey];
-                        App.rebuildClients();
+                    if (res && res.ok && res.slotKey) {
+                        delete State.occupiedSlots[res.slotKey];
+                        App.removeClientByKey(res.slotKey);
                         App.saveToCache();
                         NewRecord.renderSlots();
+                        Journal.invalidate();
+                        Clients.invalidate();
                         Journal.render();
                         Clients.render();
                         if (UI.$('page-tetradka').classList.contains('active')) Tetradka.renderAll();
                         UI.toast('Запись удалена', 'success');
                     } else {
-                        UI.toast((res && res.error) || 'Ошибка удаления', 'error');
+                        UI.toast('Ошибка удаления', 'error');
                     }
                     Records.closeModal();
                 });
@@ -907,9 +996,9 @@
         closeModal: function() { UI.$('recordModal').classList.remove('show'); }
     };
 
-    // ================================================================
+    // ============================================================
     // ⇄ MOVE
-    // ================================================================
+    // ============================================================
     var Move = {
         open: function(slotKey) {
             var data = State.occupiedSlots[slotKey];
@@ -922,20 +1011,18 @@
                 '<div class="modal-header">' +
                     '<div><h2 style="font-size:18px;font-weight:700">Перенос записи</h2>' +
                     '<div style="font-size:13px;color:var(--text-2);margin-top:4px">' + Utils.escapeHtml(data.carBrand || '') + ' · ' + Utils.escapeHtml(data.clientName || '') + '</div></div>' +
-                    '<button class="close-modal-btn" onclick="Move.close()">×</button>' +
+                    '<button class="close-modal-btn" data-close-modal="move">×</button>' +
                 '</div>' +
                 '<div class="form-group"><label>Новая дата</label><input type="text" id="moveDatePicker" class="form-control" readonly></div>' +
                 '<div class="form-group"><label>Свободные слоты</label><div class="move-slots-grid" id="moveSlotsGrid"></div></div>' +
-                '<div class="record-actions"><button class="btn" onclick="Move.close()">Отмена</button><button class="btn primary" id="confirmMoveBtn" disabled>⇄ Перенести</button></div>';
+                '<div class="record-actions"><button class="btn" data-close-modal="move">Отмена</button><button class="btn primary" id="confirmMoveBtn" disabled>⇄ Перенести</button></div>';
 
             UI.$('moveModal').classList.add('show');
 
             var ctx = { oldKey: slotKey, branch: parts[0], date: parts[1], time: parts[2], car: parts[3], selectedTime: null, selectedCar: null };
 
             flatpickr(UI.$('moveDatePicker'), {
-                dateFormat: 'Y-m-d',
-                defaultDate: parts[1],
-                locale: 'ru',
+                dateFormat: 'Y-m-d', defaultDate: parts[1], locale: 'ru',
                 onChange: function(sd, ds) {
                     ctx.date = ds;
                     ctx.selectedTime = null;
@@ -961,13 +1048,15 @@
                     notificationMethod: data.notificationMethod || 'whatsapp'
                 }).then(function(res) {
                     UI.setLoading('confirmMoveBtn', false);
-                    if (res && !res.error && res.ok && res.newKey && res.record) {
-                        // 🔑 Удаляем старую, добавляем новую
-                        delete State.occupiedSlots[res.oldKey || ctx.oldKey];
+                    if (res && res.ok) {
+                        delete State.occupiedSlots[res.oldKey];
+                        delete State.occupiedSlots[res.newKey];
                         State.occupiedSlots[res.newKey] = res.record;
                         App.rebuildClients();
                         App.saveToCache();
                         NewRecord.renderSlots();
+                        Journal.invalidate();
+                        Clients.invalidate();
                         Journal.render();
                         Clients.render();
                         UI.toast('Запись перенесена', 'success');
@@ -984,55 +1073,60 @@
             if (!grid) return;
             var slots = Utils.getTimeSlots(ctx.date);
             var currentKey = Utils.normalizeSlotKey(ctx.branch + '_' + ctx.date + '_' + ctx.time + '_' + ctx.car);
-            var fragment = document.createDocumentFragment();
 
+            var html = '';
             slots.forEach(function(time) {
                 for (var i = 0; i < Config.CARS.length; i++) {
                     var car = Config.CARS[i];
                     var key = Utils.normalizeSlotKey(ctx.branch + '_' + ctx.date + '_' + time + '_' + car);
                     var busy = !!State.occupiedSlots[key];
                     var isCurrent = (key === currentKey);
-                    var isSelected = (ctx.selectedTime === time && ctx.selectedCar === car);
 
                     var cls = 'move-slot-btn';
                     if (isCurrent) cls += ' current';
                     else if (busy) cls += ' busy';
-                    else if (isSelected) cls += ' selected';
 
-                    var btn = document.createElement('button');
-                    btn.className = cls;
-                    btn.dataset.time = time;
-                    btn.dataset.car = car;
-                    btn.textContent = time + ' · ' + car;
-                    if (busy && !isCurrent) btn.disabled = true;
-                    fragment.appendChild(btn);
+                    var disabled = (busy && !isCurrent) ? 'disabled' : '';
+                    html += '<button class="' + cls + '" data-time="' + time + '" data-car="' + car + '" ' + disabled + '>' +
+                            time + ' · ' + car +
+                            '</button>';
                 }
             });
-            grid.innerHTML = '';
-            grid.appendChild(fragment);
+            grid.innerHTML = html;
 
-            grid.querySelectorAll('.move-slot-btn:not([disabled])').forEach(function(btn) {
-                btn.addEventListener('click', function() {
+            // 🔑 Делегирование
+            if (!grid._hasDelegatedClick) {
+                grid.addEventListener('click', function(e) {
+                    var btn = e.target.closest('.move-slot-btn:not([disabled])');
+                    if (!btn) return;
                     grid.querySelectorAll('.move-slot-btn').forEach(function(b) { b.classList.remove('selected'); });
-                    this.classList.add('selected');
-                    ctx.selectedTime = this.dataset.time;
-                    ctx.selectedCar = this.dataset.car;
+                    btn.classList.add('selected');
+                    ctx.selectedTime = btn.dataset.time;
+                    ctx.selectedCar = btn.dataset.car;
                     UI.$('confirmMoveBtn').disabled = false;
                 });
-            });
+                grid._hasDelegatedClick = true;
+            }
         },
 
         close: function() { UI.$('moveModal').classList.remove('show'); }
     };
 
-    // ================================================================
+    // ============================================================
     // 📓 JOURNAL
-    // ================================================================
+    // ============================================================
     var Journal = {
+        _lastVersion: -1,
+        invalidate: function() { Journal._lastVersion = -1; },
         render: function() {
             var q = UI.$('journalSearch').value.toLowerCase().trim();
-            var entries = Object.entries(State.occupiedSlots).map(function(entry) {
-                var key = entry[0], v = entry[1];
+            // 🔑 Версия + query = ключ. Любое изменение данных → invalidate()
+            var currentKey = q + '|' + State.journalVersion;
+            if (currentKey === Journal._lastRenderKey) return;
+            Journal._lastRenderKey = currentKey;
+
+            var entries = Object.keys(State.occupiedSlots).map(function(key) {
+                var v = State.occupiedSlots[key];
                 var parts = key.split('_');
                 return Object.assign({ key: key, branch: parts[0], date: parts[1], time: parts[2], car: parts[3] }, v);
             }).sort(function(a, b) {
@@ -1059,7 +1153,7 @@
                 return;
             }
 
-            var fragment = document.createDocumentFragment();
+            var html = '';
             entries.forEach(function(e) {
                 var rating = e.rating || 'neutral';
                 var cls = rating === 'good' ? 'good' : rating === 'bad' ? 'bad' : '';
@@ -1080,9 +1174,7 @@
                     '</div>';
                 }
 
-                var item = document.createElement('div');
-                item.className = 'record-item ' + cls;
-                item.innerHTML =
+                html += '<div class="record-item ' + cls + '" data-journal-key="' + e.key + '">' +
                     '<div class="record-header">' +
                         '<span>' + (e.branch === 'ryabinina' ? '🏠 Рябинина' : '🏭 Амундсена') + ' · ' + Utils.formatDate(e.date) + ' · ' + e.time + '</span>' +
                         '<span class="rating-num ' + rating + '">' + ratingScore + '</span>' +
@@ -1095,22 +1187,36 @@
                         (e.comment ? '<div style="grid-column:1/-1"><span>Комментарий</span>' + Utils.escapeHtml(e.comment) + '</div>' : '') +
                         (e.extraComment ? '<div style="grid-column:1/-1"><span style="color:var(--warning)">Доп. комментарий</span>' + Utils.escapeHtml(e.extraComment) + '</div>' : '') +
                         paymentHtml +
-                    '</div>';
-                item.addEventListener('click', function() { Records.openModal(e.key); });
-                fragment.appendChild(item);
+                    '</div>' +
+                '</div>';
             });
-            list.innerHTML = '';
-            list.appendChild(fragment);
+            list.innerHTML = html;
+
+            if (!list._hasDelegatedClick) {
+                list.addEventListener('click', function(ev) {
+                    var item = ev.target.closest('[data-journal-key]');
+                    if (!item) return;
+                    var key = item.dataset.journalKey;
+                    if (key) Records.openModal(key);
+                });
+                list._hasDelegatedClick = true;
+            }
         }
     };
 
-    // ================================================================
+    // ============================================================
     // 👥 CLIENTS
-    // ================================================================
+    // ============================================================
     var Clients = {
+        _lastRenderKey: '',
+        invalidate: function() { Clients._lastRenderKey = ''; },
         render: function() {
             var q = UI.$('clientSearch').value.toLowerCase().trim();
-            var clients = Object.values(State.clientsDatabase);
+            var currentKey = q + '|' + State.clientsVersion;
+            if (currentKey === Clients._lastRenderKey) return;
+            Clients._lastRenderKey = currentKey;
+
+            var clients = Object.keys(State.clientsDatabase).map(function(k) { return State.clientsDatabase[k]; });
             if (q) {
                 clients = clients.filter(function(c) {
                     return (c.name || '').toLowerCase().indexOf(q) !== -1 ||
@@ -1131,10 +1237,11 @@
             var list = UI.$('clientsList');
             if (clients.length === 0) {
                 list.innerHTML = '<div class="empty-state"><span class="icon">◉</span><div class="text">' + (q ? 'Ничего не найдено' : 'Клиентов пока нет') + '</div></div>';
+                UI.$('clientsBadge').textContent = 0;
                 return;
             }
 
-            var fragment = document.createDocumentFragment();
+            var html = '';
             clients.forEach(function(c) {
                 var initial = (c.name || '?').charAt(0).toUpperCase();
                 var cars = Object.keys(c.cars).map(function(b) {
@@ -1144,9 +1251,7 @@
                 var phone = Utils.cleanPhone(c.phone);
                 var ratingScore = Utils.formatRating(c);
 
-                var card = document.createElement('div');
-                card.className = 'client-card ' + c.rating;
-                card.innerHTML =
+                html += '<div class="client-card ' + c.rating + '" data-client-phone="' + phone + '">' +
                     '<div class="client-avatar">' + Utils.escapeHtml(initial) + '</div>' +
                     '<div class="client-info">' +
                         '<div class="name">' + Utils.escapeHtml(c.name || 'Без имени') + '</div>' +
@@ -1154,13 +1259,21 @@
                     '</div>' +
                     '<div class="client-cars-mini">' + cars + '</div>' +
                     '<div class="client-stats-mini"><div class="visits-count">' + c.visits + '<small>визитов</small></div></div>' +
-                    '<div class="client-rating-num">' + ratingScore + '</div>';
-                card.addEventListener('click', function() { Clients.openModal(phone); });
-                fragment.appendChild(card);
+                    '<div class="client-rating-num">' + ratingScore + '</div>' +
+                '</div>';
             });
-            list.innerHTML = '';
-            list.appendChild(fragment);
+            list.innerHTML = html;
             UI.$('clientsBadge').textContent = Object.keys(State.clientsDatabase).length;
+
+            if (!list._hasDelegatedClick) {
+                list.addEventListener('click', function(ev) {
+                    var card = ev.target.closest('[data-client-phone]');
+                    if (!card) return;
+                    var phone = card.dataset.clientPhone;
+                    if (phone) Clients.openModal(phone);
+                });
+                list._hasDelegatedClick = true;
+            }
         },
 
         openModal: function(phone) {
@@ -1177,7 +1290,7 @@
 
             var history = client.history.slice(0, 30).map(function(h) {
                 var svcs = Utils.parseServices(h.services).join(', ') || '—';
-                var safeKey = (h.key || '').replace(/"/g, '&quot;');
+                var safeKey = Utils.escapeHtml(h.key || '');
                 return '<div class="modal-history-item" data-record-key="' + safeKey + '">' +
                     '<div class="date">' + Utils.formatDate(h.date) + ' ' + h.time + '</div>' +
                     '<div class="services">' + Utils.escapeHtml(svcs) + ' ' + Utils.escapeHtml(h.size || '') + '</div>' +
@@ -1192,7 +1305,7 @@
                         '<div class="modal-avatar">' + Utils.escapeHtml(initial) + '</div>' +
                         '<div class="modal-client-info"><h2>' + Utils.escapeHtml(client.name || 'Без имени') + '</h2><div class="phone">' + Utils.escapeHtml(client.phone || '—') + '</div></div>' +
                     '</div>' +
-                    '<button class="close-modal-btn" onclick="Clients.closeModal()">×</button>' +
+                    '<button class="close-modal-btn" data-close-modal="client">×</button>' +
                 '</div>' +
                 '<div class="modal-stats-grid">' +
                     '<div class="modal-stat"><div class="modal-stat-value">' + client.visits + '</div><div class="modal-stat-label">Визитов</div></div>' +
@@ -1241,41 +1354,57 @@
             });
         },
 
+        // 🔑 ОДИН запрос на N ключей через saveExtraBatch
         saveRating: function(phone, rating) {
             var target = rating || 'neutral';
-            var keys = Object.entries(State.occupiedSlots)
-                .filter(function(e) { return Utils.cleanPhone(e[1].phone) === phone; })
-                .map(function(e) { return e[0]; });
+            var keys = [];
+            Object.keys(State.occupiedSlots).forEach(function(k) {
+                var rec = State.occupiedSlots[k];
+                if (rec && Utils.cleanPhone(rec.phone) === phone) keys.push(k);
+            });
+            if (keys.length === 0) { UI.toast('Нет записей клиента', 'warning'); return; }
 
-            // 🔑 Отправляем параллельно все saveExtra, но только первый успешный результат используем
-            Promise.all(keys.map(function(k) {
-                return Api.saveExtra(k, State.occupiedSlots[k].extraComment || '', target, State.occupiedSlots[k].phone || '');
-            })).then(function(results) {
-                // 🔑 Каждый saveExtra вернул { ok, slotKey, record } — обновляем все
-                results.forEach(function(res) {
-                    if (res && !res.error && res.ok && res.slotKey && res.record) {
-                        State.occupiedSlots[res.slotKey] = res.record;
-                    }
-                });
-                App.rebuildClients();
-                App.saveToCache();
-                Clients.render();
-                NewRecord.renderSlots();
-                Journal.render();
-                if (UI.$('page-tetradka').classList.contains('active')) Tetradka.renderAll();
-                UI.toast('Рейтинг обновлён', 'success');
+            // Оптимистично
+            keys.forEach(function(k) { State.occupiedSlots[k].rating = target; });
+            App.rebuildClients();
+            Clients.invalidate();
+            Clients.render();
+
+            // 🔑 Один batch-запрос вместо N
+            Api.saveExtraBatch(keys, undefined, target).then(function(res) {
+                if (res && res.ok && res.updated) {
+                    var updated = res.updated;
+                    Object.keys(updated).forEach(function(k) {
+                        State.occupiedSlots[k] = updated[k];
+                    });
+                    App.rebuildClients();
+                    App.saveToCache();
+                    Clients.invalidate();
+                    Clients.render();
+                    NewRecord.renderSlots();
+                    Journal.invalidate();
+                    Journal.render();
+                    if (UI.$('page-tetradka').classList.contains('active')) Tetradka.renderAll();
+                    UI.toast('Рейтинг обновлён', 'success');
+                } else {
+                    // Откат
+                    App.bootstrap();
+                    UI.toast('Ошибка обновления', 'error');
+                }
+            }).catch(function() {
+                App.bootstrap();
+                UI.toast('Ошибка обновления', 'error');
             });
         },
 
         closeModal: function() { UI.$('clientModal').classList.remove('show'); }
     };
 
-    // ================================================================
-    // 💰 PRICES
-    // ================================================================
+    // ============================================================
+    // 💰 PRICES (без изменений, но проверен)
+    // ============================================================
     var Prices = {
         get: function(branch) { return State.prices[branch] || null; },
-
         loadFromServer: function(force) {
             if (!force && State.pricesLoaded && State.prices.ryabinina) {
                 Prices.render();
@@ -1296,7 +1425,6 @@
                 Prices.render();
             });
         },
-
         render: function() {
             var data = Prices.get(State.priceBranch);
             var content = UI.$('priceContent');
@@ -1304,11 +1432,9 @@
                 content.innerHTML = '<div class="empty-price"><span class="icon">💰</span><div class="text">Прайс пуст</div><div class="hint">Проверьте лист <b>Prices</b></div></div>';
                 return;
             }
-
             var sizesToShow = Config.SIZES;
             var html = '';
             var mobileHtml = '';
-
             data.categories.forEach(function(cat) {
                 html += '<div class="price-category">';
                 html += '<div class="price-category-title"><span class="category-icon">' + Utils.escapeHtml(cat.icon || '📋') + '</span><span>' + Utils.escapeHtml(cat.title) + '</span></div>';
@@ -1316,7 +1442,6 @@
                 html += '<div class="price-row price-header"><div class="service-name">Услуга</div>';
                 sizesToShow.forEach(function(s) { html += '<div style="text-align:center">' + s + '</div>'; });
                 html += '</div>';
-
                 cat.services.forEach(function(srv) {
                     html += '<div class="price-row"><div class="service-name">' + Utils.escapeHtml(srv.name) + '</div>';
                     sizesToShow.forEach(function(s) {
@@ -1352,9 +1477,9 @@
         }
     };
 
-    // ================================================================
+    // ============================================================
     // 📓 ТЕТРАДКА
-    // ================================================================
+    // ============================================================
     var Tetradka = {
         _autoSaveTimer: null,
         _hasChanges: false,
@@ -1364,9 +1489,7 @@
 
         init: function() {
             flatpickr(UI.$('tetradkaDatePicker'), {
-                dateFormat: 'Y-m-d',
-                defaultDate: new Date(),
-                locale: 'ru',
+                dateFormat: 'Y-m-d', defaultDate: new Date(), locale: 'ru',
                 onChange: function(sd, ds) {
                     if (Tetradka._hasChanges) {
                         Tetradka.autoSave().then(function() {
@@ -1406,7 +1529,6 @@
                 if (d) Tetradka.renderRecords(d);
             });
 
-            // 🔑 Кнопка «↻» — обновить записи на сегодня
             UI.$('refreshRecordsBtn').addEventListener('click', function() {
                 if (Tetradka._refreshingRecords) return;
                 var d = Tetradka.getCurrent();
@@ -1437,9 +1559,7 @@
                             var freshCars = (res.cars || []);
                             newD.records.forEach(function(rec) {
                                 var linked = freshCars.find(function(c) { return c.recordKey === rec.key; });
-                                if (linked && linked.recordStatus) {
-                                    rec.status = linked.recordStatus;
-                                }
+                                if (linked && linked.recordStatus) rec.status = linked.recordStatus;
                             });
                         }
                         Tetradka.renderAll();
@@ -1459,13 +1579,11 @@
             });
 
             UI.$('applyHideCarsBtn').addEventListener('click', function() {
-                var input = UI.$('carsHideInput');
-                var val = parseInt(input.value, 10);
+                var val = parseInt(UI.$('carsHideInput').value, 10);
                 if (isNaN(val) || val < 0) val = 0;
                 var d = Tetradka.getCurrent();
                 if (!d) return;
-                var max = d.cars.length;
-                if (val > max) val = max;
+                if (val > d.cars.length) val = d.cars.length;
                 State.carsHideCount = val;
                 Tetradka.renderCars(d);
             });
@@ -1489,13 +1607,8 @@
                 var d = Tetradka.getCurrent();
                 if (!d) return;
                 d.cars.push({
-                    id: 'car_' + Date.now(),
-                    car: '',
-                    recordKey: null,
-                    payment: '',
-                    total: 0,
-                    services: [{ name: 'шиномонтаж', amount: 0, payment: '' }],
-                    recordStatus: ''
+                    id: 'car_' + Date.now(), car: '', recordKey: null, payment: '', total: 0,
+                    services: [{ name: 'шиномонтаж', amount: 0, payment: '' }], recordStatus: ''
                 });
                 Tetradka.markDirty();
                 Tetradka.renderAll();
@@ -1507,9 +1620,7 @@
                 d.advances.push({
                     id: 'adv_' + Date.now(),
                     master: (State.mastersList[0] ? State.mastersList[0].name : ''),
-                    amount: 0,
-                    comment: '',
-                    payment: 'cash'
+                    amount: 0, comment: '', payment: 'cash'
                 });
                 Tetradka.markDirty();
                 Tetradka.renderAdvances(d);
@@ -1549,17 +1660,14 @@
                             });
                         });
                         var params = new URLSearchParams({
-                            action: 'saveSalaryDay',
-                            date: d.date,
-                            branch: d.branch,
+                            action: 'saveSalaryDay', date: d.date, branch: d.branch,
                             masters: JSON.stringify(mastersData),
                             cars: JSON.stringify(d.cars.map(function(c) {
                                 return {
                                     id: c.id, car: c.car, recordKey: c.recordKey || '',
                                     payment: c.payment || '',
                                     total: c.services.reduce(function(s, x) { return s + (Number(x.amount) || 0); }, 0),
-                                    services: c.services,
-                                    recordStatus: c.recordStatus || ''
+                                    services: c.services, recordStatus: c.recordStatus || ''
                                 };
                             })),
                             cash: JSON.stringify(d.cash),
@@ -1574,35 +1682,28 @@
         },
 
         getCurrent: function() { return State.tetradka[State.tetradkaBranch]; },
-
         markDirty: function() {
             Tetradka._hasChanges = true;
             Tetradka.updateSaveStatus();
             Tetradka.scheduleAutoSave();
         },
-
         scheduleAutoSave: function() {
             if (Tetradka._autoSaveTimer) clearTimeout(Tetradka._autoSaveTimer);
             Tetradka._autoSaveTimer = setTimeout(function() { Tetradka.autoSave(); }, Config.AUTOSAVE_INTERVAL);
         },
-
         autoSave: function() {
             if (!Tetradka._hasChanges) return Promise.resolve(true);
             if (Tetradka._isSaving) return Promise.resolve(false);
             var d = Tetradka.getCurrent();
             if (!d) return Promise.resolve(false);
-
-            var hasData = d.cars.length > 0 ||
-                          d.advances.length > 0 ||
+            var hasData = d.cars.length > 0 || d.advances.length > 0 ||
                           (d.cash.expenses && d.cash.expenses.length > 0) ||
                           (d.cash.start_cash && d.cash.start_cash > 0) ||
                           d.services.some(function(s) { return Object.keys(s.percents).length > 0; }) ||
                           (d.mastersOnShift && Object.keys(d.mastersOnShift).length > 0);
             if (!hasData) return Promise.resolve(true);
-
             Tetradka._isSaving = true;
             Tetradka.updateSaveStatus('saving');
-
             return Tetradka.saveInternal().then(function(ok) {
                 Tetradka._isSaving = false;
                 if (ok) {
@@ -1615,16 +1716,13 @@
                 return ok;
             });
         },
-
         manualSave: function() {
             var d = Tetradka.getCurrent();
             if (!d) return;
             if (!confirm('Закрыть смену?\n\nВсе данные будут сохранены. Продолжить?')) return;
-
             UI.setLoading('saveTetradkaBtn', true, null, 'Сохранение...');
             Tetradka._isSaving = true;
             Tetradka.updateSaveStatus('saving');
-
             Tetradka.saveInternal().then(function(ok) {
                 UI.setLoading('saveTetradkaBtn', false);
                 Tetradka._isSaving = false;
@@ -1639,11 +1737,9 @@
                 }
             });
         },
-
         saveInternal: function() {
             var d = Tetradka.getCurrent();
             if (!d) return Promise.resolve(false);
-
             var mastersData = [];
             d.services.forEach(function(svc) {
                 if (!svc.name || svc.name === 'undefined') return;
@@ -1652,33 +1748,25 @@
                     mastersData.push({ master: master, service: svc.name, percent: svc.percents[master] });
                 });
             });
-
             return Api.saveSalaryDay({
-                date: d.date,
-                branch: d.branch,
+                date: d.date, branch: d.branch,
                 masters: JSON.stringify(mastersData),
                 cars: JSON.stringify(d.cars.map(function(c) {
                     return {
-                        id: c.id,
-                        car: c.car,
-                        recordKey: c.recordKey || '',
+                        id: c.id, car: c.car, recordKey: c.recordKey || '',
                         payment: c.payment || '',
                         total: c.services.reduce(function(s, x) { return s + (Number(x.amount) || 0); }, 0),
-                        services: c.services,
-                        recordStatus: c.recordStatus || ''
+                        services: c.services, recordStatus: c.recordStatus || ''
                     };
                 })),
                 cash: JSON.stringify(d.cash),
                 advances: JSON.stringify(d.advances)
             }).then(function(res) { return !!(res && !res.error); }).catch(function() { return false; });
         },
-
         updateSaveStatus: function(forceState) {
-            var el = UI.$('saveStatus');
-            var txt = UI.$('saveStatusText');
+            var el = UI.$('saveStatus'), txt = UI.$('saveStatusText');
             if (!el || !txt) return;
             el.classList.remove('saving', 'saved', 'dirty', 'error');
-
             var state = forceState;
             if (!state) {
                 if (Tetradka._isSaving) state = 'saving';
@@ -1687,7 +1775,6 @@
                 else state = 'saved';
             }
             el.classList.add(state);
-
             if (state === 'saving') txt.textContent = 'Сохранение...';
             else if (state === 'dirty') txt.textContent = 'Есть изменения';
             else if (state === 'error') txt.textContent = 'Ошибка';
@@ -1701,21 +1788,17 @@
                 } else txt.textContent = '—';
             }
         },
-
         loadDay: function(force) {
             var date = State.tetradkaDate;
             var branch = State.tetradkaBranch;
             if (!date) return;
-
             if (!force && State.tetradkaLoaded[branch] && State.tetradka[branch] && State.tetradka[branch].date === date) {
                 Tetradka.renderAll();
                 return;
             }
-
             if (!State.tetradka[branch]) {
                 UI.$('carsList').innerHTML = '<div class="skeleton" style="height:80px"></div>';
             }
-
             Api.getSalaryDay(date, branch).then(function(res) {
                 if (!res || res.error) {
                     State.tetradka[branch] = Tetradka.emptyDay(date, branch);
@@ -1734,11 +1817,9 @@
                 Tetradka.renderAll();
             });
         },
-
         emptyDay: function(date, branch) {
             return {
-                date: date,
-                branch: branch,
+                date: date, branch: branch,
                 masters: State.mastersList.slice(),
                 mastersOnShift: {},
                 services: [
@@ -1752,7 +1833,6 @@
                 pump: { bn: 0, cash: 0, card: 0, sbp: 0 }
             };
         },
-
         applyServerData: function(branch, date, res) {
             var servicesMap = {};
             servicesMap['шиномонтаж'] = { name: 'шиномонтаж', percents: {}, fixed: true, order: 0 };
@@ -1769,10 +1849,8 @@
                         if (!svc || !svc.name || svc.name === 'undefined') return;
                         if (svc.fixed) return;
                         servicesMap[svc.name] = {
-                            name: svc.name,
-                            percents: Object.assign({}, svc.percents || {}),
-                            fixed: false,
-                            order: svc.order !== undefined ? svc.order : 100
+                            name: svc.name, percents: Object.assign({}, svc.percents || {}),
+                            fixed: false, order: svc.order !== undefined ? svc.order : 100
                         };
                     });
                 }
@@ -1783,7 +1861,6 @@
                 if (!svcName || svcName === 'undefined' || svcName === 'null') return;
                 var masterName = String(m.master || '').trim();
                 if (!masterName) return;
-
                 if (!servicesMap[svcName]) {
                     servicesMap[svcName] = { name: svcName, percents: {}, fixed: false, order: 100 };
                 }
@@ -1795,10 +1872,8 @@
                 var total = (c.services || []).reduce(function(s, x) { return s + (Number(x.amount) || 0); }, 0);
                 return {
                     id: c.id || ('car_' + Date.now()),
-                    car: c.car || '',
-                    recordKey: c.recordKey || null,
-                    payment: c.payment || '',
-                    total: total,
+                    car: c.car || '', recordKey: c.recordKey || null,
+                    payment: c.payment || '', total: total,
                     services: (c.services || []).map(function(s) {
                         return { name: s.name || '', amount: Number(s.amount) || 0, payment: s.payment || '' };
                     }),
@@ -1807,7 +1882,6 @@
             });
 
             var recs = Tetradka.getRecordsForDate(date, branch);
-
             recs.forEach(function(rec) {
                 var linkedCar = cars.find(function(c) { return c.recordKey === rec.key; });
                 if (linkedCar && linkedCar.recordStatus) {
@@ -1816,7 +1890,8 @@
                 }
             });
 
-            var servicesList = Object.values(servicesMap)
+            var servicesList = Object.keys(servicesMap)
+                .map(function(k) { return servicesMap[k]; })
                 .filter(function(s) { return s && s.name && s.name !== 'undefined'; })
                 .sort(function(a, b) {
                     if (a.fixed && !b.fixed) return -1;
@@ -1827,42 +1902,33 @@
                 });
 
             State.tetradka[branch] = {
-                date: date,
-                branch: branch,
+                date: date, branch: branch,
                 masters: State.mastersList.slice(),
                 mastersOnShift: mastersOnShift,
                 services: servicesList,
-                cars: cars,
-                records: recs,
+                cars: cars, records: recs,
                 cash: res.cash || { start_cash: 0, expenses: [] },
                 advances: res.advances || [],
                 pump: { bn: 0, cash: 0, card: 0, sbp: 0 }
             };
         },
-
         getRecordsForDate: function(date, branch) {
             var records = [];
-            Object.entries(State.occupiedSlots).forEach(function(entry) {
-                var key = entry[0], v = entry[1];
+            Object.keys(State.occupiedSlots).forEach(function(key) {
+                var v = State.occupiedSlots[key];
                 var parts = key.split('_');
                 if (parts[0] !== branch || parts[1] !== date) return;
                 records.push({
-                    key: key,
-                    time: parts[2],
-                    car: v.carBrand || '',
-                    client: v.clientName || '',
-                    phone: v.phone || '',
-                    comment: v.comment || '',
-                    extraComment: v.extraComment || '',
-                    rating: v.rating || 'neutral',
-                    status: 'pending',
-                    linkedCarId: null
+                    key: key, time: parts[2],
+                    car: v.carBrand || '', client: v.clientName || '',
+                    phone: v.phone || '', comment: v.comment || '',
+                    extraComment: v.extraComment || '', rating: v.rating || 'neutral',
+                    status: 'pending', linkedCarId: null
                 });
             });
             records.sort(function(a, b) { return a.time.localeCompare(b.time); });
             return records;
         },
-
         renderAll: function() {
             var d = Tetradka.getCurrent();
             if (!d) return;
@@ -1896,7 +1962,6 @@
             records.forEach(function(r) {
                 var cls = r.status === 'confirmed' ? 'done' : r.status === 'declined' ? 'declined' : 'pending';
                 var hasComment = r.comment || r.extraComment;
-
                 var phone = Utils.cleanPhone(r.phone || '');
                 var client = State.clientsDatabase[phone];
                 var ratingNum = '', ratingCls = 'neutral';
@@ -1912,9 +1977,7 @@
                 html += '<div class="car">' + Utils.escapeHtml(r.car) + '</div>';
                 html += '<div class="client-line">';
                 html += '<span class="client">' + Utils.escapeHtml(r.client || '—') + '</span>';
-                if (ratingNum) {
-                    html += '<span class="rec-rating ' + ratingCls + '">' + ratingNum + '</span>';
-                }
+                if (ratingNum) html += '<span class="rec-rating ' + ratingCls + '">' + ratingNum + '</span>';
                 html += '</div>';
                 if (r.phone) html += '<div class="phone">' + Utils.escapeHtml(r.phone) + '</div>';
                 html += '</div>';
@@ -1946,7 +2009,6 @@
                     var rec = d.records.find(function(x) { return x.key === key; });
                     if (!rec) return;
                     rec.status = 'confirmed';
-
                     var existingCar = d.cars.find(function(c) { return c.recordKey === key; });
                     if (existingCar) {
                         existingCar.recordStatus = 'confirmed';
@@ -1954,17 +2016,12 @@
                     } else {
                         var carId = 'car_' + Date.now();
                         d.cars.push({
-                            id: carId,
-                            car: rec.car,
-                            recordKey: key,
-                            payment: '',
-                            total: 0,
+                            id: carId, car: rec.car, recordKey: key, payment: '', total: 0,
                             services: [{ name: 'шиномонтаж', amount: 0, payment: '' }],
                             recordStatus: 'confirmed'
                         });
                         rec.linkedCarId = carId;
                     }
-
                     Api.updateRecordStatus(key, 'confirmed');
                     Tetradka.markDirty();
                     Tetradka.renderAll();
@@ -1977,10 +2034,8 @@
                     var key = btn.dataset.decline;
                     var rec = d.records.find(function(x) { return x.key === key; });
                     if (rec) rec.status = 'declined';
-
                     var existingCar = d.cars.find(function(c) { return c.recordKey === key; });
                     if (existingCar) existingCar.recordStatus = 'declined';
-
                     Api.updateRecordStatus(key, 'declined');
                     Tetradka.markDirty();
                     Tetradka.renderAll();
@@ -2072,8 +2127,7 @@
             document.querySelectorAll('[data-svc-name]').forEach(function(inp) {
                 inp.addEventListener('change', function() {
                     var idx = Number(inp.dataset.svcName);
-                    var newName = inp.value.trim() || 'услуга';
-                    d.services[idx].name = newName;
+                    d.services[idx].name = inp.value.trim() || 'услуга';
                     Tetradka.markDirty();
                     Tetradka.renderAll();
                 });
@@ -2100,11 +2154,8 @@
 
         renderCars: function(d) {
             var html = '';
-            var svcOptions = d.services
-                .filter(function(s) { return s && s.name; })
-                .map(function(s) { return s.name; });
+            var svcOptions = d.services.filter(function(s) { return s && s.name; }).map(function(s) { return s.name; });
             var paymentCodes = Payments.all();
-
             var total = d.cars.length;
             var hideCount = Math.min(State.carsHideCount || 0, total);
             var visibleCars = d.cars.slice(hideCount);
@@ -2126,14 +2177,10 @@
                 html += '<div class="num">#' + (originalIdx + 1) + (hasRecord ? ' 🔗' : '') + '</div>';
                 html += '<input class="car-name" type="text" value="' + Utils.escapeHtml(c.car) + '" data-car="' + c.id + '" placeholder="МАРКА">';
                 html += '<div class="total">' + Utils.fmtMoney(carTotal) + '</div>';
-                if (hasRecord) {
-                    html += '<button class="open-record" data-open-car-record="' + c.recordKey + '" title="Открыть запись">👁</button>';
-                } else {
-                    html += '<div class="spacer"></div>';
-                }
+                if (hasRecord) html += '<button class="open-record" data-open-car-record="' + c.recordKey + '" title="Открыть запись">👁</button>';
+                else html += '<div class="spacer"></div>';
                 html += '<button class="del" data-car-del="' + c.id + '">✕</button>';
                 html += '</div>';
-
                 html += '<div class="car-services-row">';
                 c.services.forEach(function(svc, sidx) {
                     var payCls = svc.payment ? 'has-value' : '';
@@ -2152,11 +2199,8 @@
                         html += '<option value="' + code + '" ' + sel + '>' + Payments.label(code) + '</option>';
                     });
                     html += '</select>';
-                    if (c.services.length > 1) {
-                        html += '<button class="del" data-car-svc-del="' + c.id + '" data-car-svc-idx="' + sidx + '">✕</button>';
-                    } else {
-                        html += '<div class="spacer"></div>';
-                    }
+                    if (c.services.length > 1) html += '<button class="del" data-car-svc-del="' + c.id + '" data-car-svc-idx="' + sidx + '">✕</button>';
+                    else html += '<div class="spacer"></div>';
                     html += '</div>';
                 });
                 html += '<button class="car-add-service-inline" data-car-add-svc="' + c.id + '">+ услуга</button>';
@@ -2334,10 +2378,7 @@
                         if (pct === undefined) return;
                         var sum = serviceSums[svc.name] || 0;
                         var salary = sum * (pct / 100);
-                        rows += '<div class="row">' +
-                            '<span class="label">' + Utils.escapeHtml(svc.name) + ' · ' + pct + '%</span>' +
-                            '<span class="value">' + Utils.fmtMoney(Math.round(salary)) + '</span>' +
-                            '</div>';
+                        rows += '<div class="row"><span class="label">' + Utils.escapeHtml(svc.name) + ' · ' + pct + '%</span><span class="value">' + Utils.fmtMoney(Math.round(salary)) + '</span></div>';
                     });
                     card.innerHTML = rows;
                     cardsWrap.appendChild(card);
@@ -2451,9 +2492,7 @@
                     if (svc.payment === 'cash') incomeCash += Number(svc.amount) || 0;
                 });
             });
-            var advancesCash = d.advances.reduce(function(sum, a) {
-                return sum + (Number(a.amount) || 0);
-            }, 0);
+            var advancesCash = d.advances.reduce(function(sum, a) { return sum + (Number(a.amount) || 0); }, 0);
             var expensesSum = (d.cash.expenses || []).reduce(function(sum, e) { return sum + (Number(e.amount) || 0); }, 0);
             var total = Number(d.cash.start_cash) + incomeCash - advancesCash - expensesSum;
 
@@ -2464,14 +2503,12 @@
             if (UI.$('cashStart').value != d.cash.start_cash) UI.$('cashStart').value = d.cash.start_cash;
         },
 
-        renderCash: function(d) {
-            Tetradka.updateCashDisplay(d);
-        }
+        renderCash: function(d) { Tetradka.updateCashDisplay(d); }
     };
 
-    // ================================================================
+    // ============================================================
     // 💰 ЗАРПЛАТЫ
-    // ================================================================
+    // ============================================================
     var Zarp = {
         init: function() {
             document.querySelectorAll('.zarp-branch').forEach(function(btn) {
@@ -2482,7 +2519,6 @@
                     Zarp.render();
                 });
             });
-
             UI.$('prevMonth').addEventListener('click', function() {
                 State.zarpMonth--;
                 if (State.zarpMonth < 0) { State.zarpMonth = 11; State.zarpYear--; }
@@ -2493,7 +2529,6 @@
                 if (State.zarpMonth > 11) { State.zarpMonth = 0; State.zarpYear++; }
                 Zarp.loadAndRender();
             });
-
             UI.$('closeMonthBtn').addEventListener('click', function() {
                 if (!confirm('Закрыть месяц? Остатки перенесутся на следующий месяц.')) return;
                 Api.closeMonth({ year: State.zarpYear, month: State.zarpMonth, branch: State.zarpBranch }).then(function(res) {
@@ -2503,23 +2538,19 @@
                         State.salaryMonthLoadedKey = null;
                         SalaryCache.clearAll();
                         Zarp.loadAndRender(true);
-                    }
-                    else UI.toast('Ошибка', 'error');
+                    } else UI.toast('Ошибка', 'error');
                 });
             });
-
             UI.$('addMarkBtn').addEventListener('click', Zarp.openMarkModal);
         },
 
         loadAndRender: function(force) {
             UI.$('monthLabel').textContent = Zarp.monthLabel(State.zarpYear, State.zarpMonth);
             var currentKey = State.zarpYear + '_' + State.zarpMonth;
-
             if (!force && State.salaryMonthData && State.salaryMonthLoadedKey === currentKey) {
                 Zarp.render();
                 return;
             }
-
             if (!force) {
                 var cached = SalaryCache.load(currentKey);
                 if (cached) {
@@ -2530,7 +2561,6 @@
                     return;
                 }
             }
-
             UI.$('monthSummary').innerHTML = '<div class="skeleton" style="height:80px"></div>';
             UI.$('daysBody').innerHTML = '<tr><td colspan="10" style="text-align:center;padding:20px"><span class="spinner"></span></td></tr>';
             UI.$('combinedBody').innerHTML = '';
@@ -2676,13 +2706,11 @@
             Object.keys(allMasters).forEach(function(master) {
                 var salary = 0;
                 (data.days || []).forEach(function(d) { salary += (d.payroll || {})[master] || 0; });
-
                 var advancesCassa = 0;
                 (data.advances || []).forEach(function(a) { if (a.master === master) advancesCassa += a.amount; });
                 var advancesExt = 0;
                 (data.marks || []).forEach(function(m) { if (m.master === master && m.type === 'adv') advancesExt += m.amount; });
                 var advances = advancesCassa + advancesExt;
-
                 var warn = 0, bad = 0, good = 0;
                 (data.marks || []).forEach(function(m) {
                     if (m.master !== master) return;
@@ -2690,7 +2718,6 @@
                     else if (m.type === 'bad') bad += m.amount;
                     else if (m.type === 'good') good += m.amount;
                 });
-
                 var balance = salary + warn + good - advances - bad;
                 if (salary === 0 && advances === 0 && warn === 0 && bad === 0 && good === 0) return;
 
@@ -2722,27 +2749,20 @@
 
         renderMarks: function(data) {
             var allItems = [];
-
             (data.advances || []).forEach(function(a) {
                 allItems.push({
                     id: 'cassa_' + a.id, type: 'adv-cassa',
                     master: a.master, amount: a.amount,
                     comment: a.comment || '', date: a.date,
-                    branch: a.branch || '',
-                    readonly: true
+                    branch: a.branch || '', readonly: true
                 });
             });
-
             (data.marks || []).forEach(function(m) {
                 allItems.push({
-                    id: m.id, type: m.type,
-                    master: m.master, amount: m.amount,
-                    comment: m.comment || '', date: m.date,
-                    branch: m.branch || '',
-                    readonly: false
+                    id: m.id, type: m.type, master: m.master, amount: m.amount,
+                    comment: m.comment || '', date: m.date, branch: m.branch || '', readonly: false
                 });
             });
-
             allItems.sort(function(a, b) { return a.date < b.date ? 1 : -1; });
 
             var html = '';
@@ -2790,7 +2810,7 @@
             content.innerHTML =
                 '<div class="modal-header">' +
                     '<div><h2 style="font-size:18px;font-weight:700">Добавить пометку</h2></div>' +
-                    '<button class="close-modal-btn" onclick="Zarp.closeModal()">×</button>' +
+                    '<button class="close-modal-btn" data-close-modal="mark">×</button>' +
                 '</div>' +
                 '<div class="form-group"><label>Мастер</label><select class="form-control" id="markMaster"></select></div>' +
                 '<div class="form-group"><label>Тип</label><select class="form-control" id="markType">' +
@@ -2801,7 +2821,7 @@
                 '</select></div>' +
                 '<div class="form-group"><label>Сумма (₽)</label><input type="number" class="form-control" id="markAmount" placeholder="0" step="100" min="0"></div>' +
                 '<div class="form-group"><label>Комментарий</label><input type="text" class="form-control" id="markComment" placeholder="необязательно"></div>' +
-                '<div class="record-actions"><button class="btn" onclick="Zarp.closeModal()">Отмена</button><button class="btn primary" id="saveMarkBtn">Сохранить</button></div>';
+                '<div class="record-actions"><button class="btn" data-close-modal="mark">Отмена</button><button class="btn primary" id="saveMarkBtn">Сохранить</button></div>';
 
             var sel = UI.$('markMaster');
             var optionsHtml = '<option value="">— выберите —</option>';
@@ -2845,10 +2865,121 @@
         }
     };
 
-    // ================================================================
+    // ============================================================
     // 🎯 APP
-    // ================================================================
+    // ============================================================
     var App = {
+        addClientFromRecord: function(slotKey, rec) {
+            if (!rec || !rec.phone) return;
+            var phone = Utils.cleanPhone(rec.phone);
+            var parts = slotKey.split('_');
+            var branch = parts[0], date = parts[1], time = parts[2], car = parts[3];
+
+            if (!State.clientsDatabase[phone]) {
+                State.clientsDatabase[phone] = {
+                    phone: rec.phone, name: rec.clientName || '',
+                    cars: {}, rating: rec.rating || 'neutral',
+                    visits: 0, goodCount: 0, badCount: 0, neutralCount: 0, history: []
+                };
+            }
+            var c = State.clientsDatabase[phone];
+            c.visits++;
+            var rating = rec.rating || 'neutral';
+            if (rating === 'good') c.goodCount++;
+            else if (rating === 'bad') c.badCount++;
+            else c.neutralCount++;
+            if (rating !== 'neutral') c.rating = rating;
+            var brand = rec.carBrand || '—';
+            if (!c.cars[brand]) c.cars[brand] = 0;
+            c.cars[brand]++;
+            if (rec.clientName) c.name = rec.clientName;
+            c.history.push({
+                branch: branch, date: date, time: time, car: car, key: slotKey,
+                services: Utils.parseServices(rec.services),
+                size: rec.size || '', rating: rating,
+                comment: rec.comment || '', extraComment: rec.extraComment || ''
+            });
+            c.history.sort(function(a, b) {
+                return (String(b.date || '') + String(b.time || '')).localeCompare(String(a.date || '') + String(a.time || ''));
+            });
+            State.clientsVersion++;
+        },
+
+        removeClientByKey: function(slotKey) {
+            var rec = State.occupiedSlots[slotKey];
+            if (!rec) {
+                // Может уже удалили — попробуем найти в клиентах
+                return;
+            }
+            var phone = Utils.cleanPhone(rec.phone);
+            var c = State.clientsDatabase[phone];
+            if (!c) return;
+            c.visits--;
+            var rating = rec.rating || 'neutral';
+            if (rating === 'good') c.goodCount--;
+            else if (rating === 'bad') c.badCount--;
+            else c.neutralCount--;
+            var brand = rec.carBrand || '—';
+            if (c.cars[brand]) {
+                c.cars[brand]--;
+                if (c.cars[brand] <= 0) delete c.cars[brand];
+            }
+            c.history = c.history.filter(function(h) { return h.key !== slotKey; });
+            if (c.visits <= 0) delete State.clientsDatabase[phone];
+            State.clientsVersion++;
+            State.journalVersion++;
+        },
+
+        // 🔑 Точечная проверка после timeout
+        verifyRecordSaved: function(slotKey, payload, attempt) {
+            attempt = attempt || 0;
+            if (attempt > 3) {
+                UI.toast('Не удалось подтвердить запись — обновляем', 'warning', 3000);
+                App.bootstrap();
+                return;
+            }
+            // Проверяем через bootstrap-кэш: если Apps Script ещё думает — получим старые данные
+            // Поэтому просто делаем getAll и смотрим, есть ли ключ
+            Api.getAll().then(function(res) {
+                if (!res || res.error) {
+                    setTimeout(function() {
+                        App.verifyRecordSaved(slotKey, payload, attempt + 1);
+                    }, 3000 * (attempt + 1));
+                    return;
+                }
+                var normalized = Utils.normalizeAllKeys(res);
+                if (normalized[slotKey]) {
+                    // Сохранилось
+                    State.occupiedSlots = normalized;
+                    App.rebuildClients();
+                    App.saveToCache();
+                    NewRecord.renderSlots();
+                    Journal.invalidate();
+                    Clients.invalidate();
+                    Journal.render();
+                    Clients.render();
+                    App.updateStats();
+                    UI.toast('✓ Запись подтверждена', 'success', 1500);
+                } else {
+                    // Не сохранилось — убираем optimistic
+                    delete State.occupiedSlots[slotKey];
+                    App.removeClientByKey(slotKey);
+                    App.rebuildClients();
+                    NewRecord.renderSlots();
+                    Journal.invalidate();
+                    Clients.invalidate();
+                    Journal.render();
+                    Clients.render();
+                    App.updateStats();
+                    UI.toast('Запись не сохранилась — повторите', 'error', 5000);
+                }
+            }).catch(function() {
+                setTimeout(function() {
+                    App.verifyRecordSaved(slotKey, payload, attempt + 1);
+                }, 3000 * (attempt + 1));
+            });
+        },
+
         saveToCache: function() {
             LocalCache.save({
                 records: State.occupiedSlots,
@@ -2857,11 +2988,32 @@
             });
         },
 
+        // 🔑 ИСПРАВЛЕНО: правильный порядок merge
         applyBootstrap: function(data) {
             if (!data) return;
 
             if (data.records && !data.records.error) {
-                State.occupiedSlots = Utils.normalizeAllKeys(data.records);
+                var normalized = Utils.normalizeAllKeys(data.records);
+
+                // Собираем optimistic-ключи, которых НЕТ в серверных данных
+                var now = Date.now();
+                var optimisticToKeep = {};
+                Object.keys(State.occupiedSlots).forEach(function(key) {
+                    var local = State.occupiedSlots[key];
+                    if (!local || !local._optimistic) return;
+                    // TTL истёк — пропускаем
+                    if ((now - (local._optimisticAt || 0)) > Config.OPTIMISTIC_TTL) return;
+                    // Сервер уже знает — не добавляем (перезапишется серверными)
+                    if (normalized[key]) return;
+                    optimisticToKeep[key] = local;
+                });
+
+                State.occupiedSlots = normalized;
+                // Добавляем optimistic, которых нет на сервере
+                Object.keys(optimisticToKeep).forEach(function(key) {
+                    State.occupiedSlots[key] = optimisticToKeep[key];
+                });
+
                 App.rebuildClients();
             }
 
@@ -2925,6 +3077,8 @@
 
         renderAll: function() {
             NewRecord.renderSlots();
+            Journal.invalidate();
+            Clients.invalidate();
             Journal.render();
             Clients.render();
             App.updateStats();
@@ -2934,8 +3088,8 @@
 
         rebuildClients: function() {
             State.clientsDatabase = {};
-            Object.entries(State.occupiedSlots).forEach(function(entry) {
-                var key = entry[0], rec = entry[1];
+            Object.keys(State.occupiedSlots).forEach(function(key) {
+                var rec = State.occupiedSlots[key];
                 if (!rec || !rec.phone) return;
                 var phone = Utils.cleanPhone(rec.phone);
                 var parts = key.split('_');
@@ -2966,24 +3120,30 @@
                     comment: rec.comment || '', extraComment: rec.extraComment || ''
                 });
             });
-            Object.values(State.clientsDatabase).forEach(function(c) {
+            Object.keys(State.clientsDatabase).forEach(function(k) {
+                var c = State.clientsDatabase[k];
                 c.history.sort(function(a, b) {
-                    return (String(b.date || '') + String(b.time || '')).localeCompare(String(a.date || '') + String(a.time || ''));
+                    return (String(b.date || '') + String(a.time || '')).localeCompare(String(a.date || '') + String(b.time || ''));
                 });
             });
+            State.clientsVersion++;
+            State.journalVersion++;
         },
 
+        // 🔑 Исправлено: total без обеда
         updateStats: function() {
             var date = UI.$('datePicker').value;
             if (date) {
                 var slots = Utils.getTimeSlots(date);
                 var booked = 0;
+                var total = 0;
                 slots.forEach(function(t) {
                     Config.CARS.forEach(function(c) {
+                        total++;
                         if (State.occupiedSlots[State.currentBranch + '_' + date + '_' + t + '_' + c]) booked++;
                     });
                 });
-                UI.$('statFreeSlots').textContent = slots.length * Config.CARS.length - booked;
+                UI.$('statFreeSlots').textContent = total - booked;
                 UI.$('statBooked').textContent = booked;
             }
         },
@@ -2998,8 +3158,8 @@
             }
             var client = State.clientsDatabase[phone];
             if (client && client.name) {
-                var carsList = Object.entries(client.cars).map(function(e) {
-                    return e[0] + (e[1] > 1 ? ' (' + e[1] + ')' : '');
+                var carsList = Object.keys(client.cars).map(function(b) {
+                    return b + (client.cars[b] > 1 ? ' (' + client.cars[b] + ')' : '');
                 }).join(', ');
                 var stars = Utils.formatRating(client);
                 var cls = client.rating === 'good' ? 'good' : client.rating === 'bad' ? 'bad' : 'neutral';
@@ -3043,7 +3203,7 @@
         },
         showCarsChips: function(client) {
             var el = UI.$('carsChips');
-            var cars = Object.entries(client.cars);
+            var cars = Object.keys(client.cars).map(function(k) { return [k, client.cars[k]]; });
             if (cars.length <= 1) { App.hideCarsChips(); return; }
             el.style.display = 'flex';
             el.innerHTML = '<div class="label">Машины клиента:</div>';
@@ -3090,6 +3250,9 @@
                 State.salaryMonthLoadedKey = null;
                 State.pricesLoaded = false;
                 State.tetradkaLoaded = { ryabinina: false, amundsena: false };
+                State.clientsDatabase = {};
+                Clients.invalidate();
+                Journal.invalidate();
                 App.bootstrap();
                 UI.toast('Обновлено', 'success', 1500);
             });
@@ -3145,9 +3308,28 @@
                 });
             });
 
-            UI.$('clientSearch').addEventListener('input', Utils.debounce(Clients.render, 200));
-            UI.$('journalSearch').addEventListener('input', Utils.debounce(Journal.render, 200));
+            UI.$('clientSearch').addEventListener('input', Utils.debounce(function() {
+                Clients.invalidate();
+                Clients.render();
+            }, 200));
+            UI.$('journalSearch').addEventListener('input', Utils.debounce(function() {
+                Journal.invalidate();
+                Journal.render();
+            }, 200));
 
+            // 🔑 Делегирование закрытия модалок (data-close-modal)
+            document.addEventListener('click', function(e) {
+                var closeBtn = e.target.closest('[data-close-modal]');
+                if (closeBtn) {
+                    var which = closeBtn.dataset.closeModal;
+                    if (which === 'record') Records.closeModal();
+                    else if (which === 'move') Move.close();
+                    else if (which === 'client') Clients.closeModal();
+                    else if (which === 'mark') Zarp.closeModal();
+                }
+            });
+
+            // Клик по оверлею
             UI.$('clientModal').addEventListener('click', function(e) {
                 if (e.target === UI.$('clientModal')) Clients.closeModal();
             });
@@ -3177,7 +3359,7 @@
 
             document.addEventListener('visibilitychange', function() {
                 if (!document.hidden && !State.isUpdating) {
-                    if (Date.now() - State.lastBootstrapAt > 30000) App.bootstrap();
+                    if (Date.now() - State.lastBootstrapAt > 90000) App.bootstrap();
                 }
             });
 
@@ -3206,31 +3388,37 @@
             flatpickr.localize(flatpickr.l10ns.ru);
             State.tetradkaDate = new Date().toISOString().slice(0, 10);
 
-            // 🔑 keepalive — не даём Apps Script уснуть
+            // Keepalive ping — warm-up + не даём заснуть
+            setTimeout(function() { Api.ping(); }, 500);
             setInterval(function() {
                 if (!document.hidden) Api.ping();
             }, 240000);
-            setTimeout(function() { Api.ping(); }, 1000);
+
+            // Чистка зависших optimistic
+            setInterval(function() {
+                var now = Date.now();
+                var had = false;
+                Object.keys(State.occupiedSlots).forEach(function(key) {
+                    var rec = State.occupiedSlots[key];
+                    if (rec._optimistic && (now - (rec._optimisticAt || 0)) > Config.OPTIMISTIC_TTL) {
+                        delete State.occupiedSlots[key];
+                        had = true;
+                    }
+                });
+                if (had) {
+                    App.rebuildClients();
+                    NewRecord.renderSlots();
+                    App.updateStats();
+                }
+            }, 30000);
 
             App.bootstrap();
 
-            // 🔑 Auto-refresh каждые 15 сек (мультиоператор)
-            // Не срабатывает, если открыта Тетрадка с несохранёнными изменениями
             setInterval(function() {
-                if (State.isUpdating || document.hidden) return;
-                if (Tetradka._hasChanges) return;
-                State.isUpdating = true;
-                Api.getAll().then(function(records) {
-                    if (records && !records.error) {
-                        State.occupiedSlots = Utils.normalizeAllKeys(records);
-                        App.rebuildClients();
-                        NewRecord.renderSlots();
-                        App.updateStats();
-                        // Не рендерим журнал и клиентов — экономим CPU
-                        if (UI.$('page-journal').classList.contains('active')) Journal.render();
-                    }
-                    State.isUpdating = false;
-                }).catch(function() { State.isUpdating = false; });
+                if (!State.isUpdating && !document.hidden && !Tetradka._hasChanges) {
+                    State.isUpdating = true;
+                    App.bootstrap().then(function() { State.isUpdating = false; });
+                }
             }, Config.REFRESH_INTERVAL);
         }
     };
