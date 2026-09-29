@@ -1,18 +1,23 @@
 /* ============================================================
- * PRO-шина · CRM — app.js v3.3
+ * PRO-шина · CRM — app.js v3.4
  *
- * НОВОЕ ОТНОСИТЕЛЬНО v3.2:
- *  - Кнопки «↻ Обновить» на вкладках Новая запись / Тетрадка / Зарплаты
- *  - Кнопка «Сегодня» под календарём в Новой записи
- *  - Placeholder "0" вместо value="0" в услугах/суммах (не надо стирать)
- *  - setLoading безопасный (fallback на btn, если textId отсутствует)
+ * ИСПРАВЛЕНИЯ:
+ *  - Подкачка сохраняется и читается с сервера (pump)
+ *  - saveInternal и beforeunload отправляют pump
+ *  - applyServerData читает pump с сервера
+ *  - refreshRecordsOnly сохраняет локальный pump
+ *  - Кнопки «↻ Обновить» на Новой записи / Тетрадке / Зарплатах
+ *  - Кнопка «Сегодня» под календарём
+ *  - Placeholder "0" вместо value="0"
+ *  - setLoading безопасный
+ *  - formatPhone без зеркалирования
  * ============================================================ */
 
 (function() {
     'use strict';
 
     var Config = {
-        APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbyyS4_VX8yLb9Pty9Y4684jm6tpvDJSqhFy9iy4EVFjROKwyG12koVXUW6wwD-zV1k/exec',
+        APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbxb6t0HbmYccgwUmIufH1_YMgmAjWAIbmKE_-k3Y3qFe_YpH79Yey-0xslKtOeQ4L6D/exec',
         CARS: ['1', '2', '3'],
         SIZES: ['R13','R14','R15','R16','R17','R18','R19','R20','R21','R22','R23'],
         REFRESH_INTERVAL: 120000,
@@ -245,7 +250,6 @@
             return out;
         },
 
-        // 🔑 Телефон без зеркалирования
         formatPhone: function(value, cursorPos) {
             var digits = value.replace(/\D/g, '');
             if (digits.length > 0 && (digits[0] === '7' || digits[0] === '8')) {
@@ -381,7 +385,6 @@
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#39;');
         },
-        // 🔑 Число → строка для input: 0 → '', иначе как есть
         numToInput: function(n) {
             var num = Number(n);
             if (isNaN(num) || num === 0) return '';
@@ -404,8 +407,6 @@
                 setTimeout(function() { el.remove(); }, 300);
             }, duration);
         },
-
-        // 🔑 Безопасный setLoading — не падает, если textId отсутствует
         setLoading: function(btnId, loading, textId, loadingText) {
             var btn = UI.$(btnId);
             if (!btn) return;
@@ -426,7 +427,6 @@
                 }
             }
         },
-
         skeletonSlots: function(count) {
             count = count || 6;
             var html = '';
@@ -482,7 +482,6 @@
                 }
             });
 
-            // 🔑 Кнопка «Сегодня»
             var todayBtn = UI.$('todayBtn');
             if (todayBtn) {
                 todayBtn.addEventListener('click', function() {
@@ -491,7 +490,6 @@
                         String(now.getMonth() + 1).padStart(2, '0') + '-' +
                         String(now.getDate()).padStart(2, '0');
                     var datePicker = UI.$('datePicker');
-                    // flatpickr setDate сам обновит value и вызовет onChange
                     if (datePicker._flatpickr) {
                         datePicker._flatpickr.setDate(today, true);
                     } else {
@@ -1559,7 +1557,6 @@
                 Tetradka.refreshRecordsOnly(this);
             });
 
-            // 🔑 Кнопка «↻ Обновить» в шапке — полная перезагрузка
             UI.$('refreshTetradkaBtn').addEventListener('click', function() {
                 Tetradka.fullRefresh(this);
             });
@@ -1657,7 +1654,8 @@
                                 };
                             })),
                             cash: JSON.stringify(d.cash),
-                            advances: JSON.stringify(d.advances)
+                            advances: JSON.stringify(d.advances),
+                            pump: JSON.stringify(d.pump)
                         });
                         try { navigator.sendBeacon(Config.APPS_SCRIPT_URL, params); } catch (e) {}
                     }
@@ -1667,7 +1665,6 @@
             setInterval(function() { Tetradka.updateSaveStatus(); }, 10000);
         },
 
-        // 🔑 Обновление только записей (лёгкое)
         refreshRecordsOnly: function(btn) {
             if (Tetradka._refreshingRecords) return;
             var d = Tetradka.getCurrent();
@@ -1684,6 +1681,7 @@
                     var savedCash = d.cash;
                     var savedMastersOnShift = d.mastersOnShift;
                     var savedServices = d.services;
+                    var savedPump = d.pump;
 
                     Tetradka.applyServerData(d.branch, d.date, res);
 
@@ -1694,6 +1692,7 @@
                         newD.cash = savedCash;
                         newD.mastersOnShift = savedMastersOnShift;
                         newD.services = savedServices;
+                        if (savedPump) newD.pump = savedPump;
                         newD.records = Tetradka.getRecordsForDate(d.date, d.branch);
                         var freshCars = (res.cars || []);
                         newD.records.forEach(function(rec) {
@@ -1717,7 +1716,6 @@
             });
         },
 
-        // 🔑 Полная перезагрузка текущего дня
         fullRefresh: function(btn) {
             if (Tetradka._refreshingFull) return;
             Tetradka._refreshingFull = true;
@@ -1733,7 +1731,6 @@
                 return;
             }
 
-            // Сохраняем несохранённое перед обновлением
             var doLoad = function() {
                 State.tetradkaLoaded[State.tetradkaBranch] = false;
                 Api.getSalaryDay(d.date, d.branch).then(function(res) {
@@ -1784,6 +1781,7 @@
             var hasData = d.cars.length > 0 || d.advances.length > 0 ||
                           (d.cash.expenses && d.cash.expenses.length > 0) ||
                           (d.cash.start_cash && d.cash.start_cash > 0) ||
+                          (d.pump && (d.pump.bn || d.pump.cash || d.pump.card || d.pump.sbp)) ||
                           d.services.some(function(s) { return Object.keys(s.percents).length > 0; }) ||
                           (d.mastersOnShift && Object.keys(d.mastersOnShift).length > 0);
             if (!hasData) return Promise.resolve(true);
@@ -1822,6 +1820,7 @@
                 }
             });
         },
+        // 🔑 saveInternal — теперь с pump
         saveInternal: function() {
             var d = Tetradka.getCurrent();
             if (!d) return Promise.resolve(false);
@@ -1845,7 +1844,8 @@
                     };
                 })),
                 cash: JSON.stringify(d.cash),
-                advances: JSON.stringify(d.advances)
+                advances: JSON.stringify(d.advances),
+                pump: JSON.stringify(d.pump)   // 🔑 новое
             }).then(function(res) { return !!(res && !res.error); }).catch(function() { return false; });
         },
         updateSaveStatus: function(forceState) {
@@ -1918,6 +1918,7 @@
                 pump: { bn: 0, cash: 0, card: 0, sbp: 0 }
             };
         },
+        // 🔑 applyServerData — теперь читает pump с сервера
         applyServerData: function(branch, date, res) {
             var servicesMap = {};
             servicesMap['шиномонтаж'] = { name: 'шиномонтаж', percents: {}, fixed: true, order: 0 };
@@ -1986,6 +1987,17 @@
                     return String(a.name).localeCompare(String(b.name));
                 });
 
+            // 🔑 Читаем pump с сервера
+            var pumpData = { bn: 0, cash: 0, card: 0, sbp: 0 };
+            if (res.pump && typeof res.pump === 'object') {
+                pumpData = {
+                    bn: Number(res.pump.bn) || 0,
+                    cash: Number(res.pump.cash) || 0,
+                    card: Number(res.pump.card) || 0,
+                    sbp: Number(res.pump.sbp) || 0
+                };
+            }
+
             State.tetradka[branch] = {
                 date: date, branch: branch,
                 masters: State.mastersList.slice(),
@@ -1994,7 +2006,7 @@
                 cars: cars, records: recs,
                 cash: res.cash || { start_cash: 0, expenses: [] },
                 advances: res.advances || [],
-                pump: { bn: 0, cash: 0, card: 0, sbp: 0 }
+                pump: pumpData
             };
         },
         getRecordsForDate: function(date, branch) {
@@ -2134,7 +2146,6 @@
             ['bn', 'cash', 'card', 'sbp'].forEach(function(code) {
                 var val = d.pump[code] || 0;
                 total += val;
-                // 🔑 placeholder вместо value, если 0
                 html += '<div class="pump-row"><div class="label">' + Payments.label(code) + '</div>' +
                         '<input type="number" value="' + Utils.numToInput(val) + '" min="0" step="25" placeholder="0" data-pump="' + code + '"></div>';
             });
@@ -2203,7 +2214,6 @@
                 activeMasters.forEach(function(m) {
                     var val = svc.percents[m.name];
                     var cls = val !== undefined ? 'on' : '';
-                    // 🔑 placeholder "—" для пустых значений
                     bodyHtml += '<td class="pct-cell"><input type="number" step="0.1" min="0" max="100" value="' + (val !== undefined ? val : '') + '" class="' + cls + '" data-svc-pct="' + idx + '" data-master-name="' + Utils.escapeHtml(m.name) + '" placeholder="—"></td>';
                 });
                 bodyHtml += '<td>';
@@ -2279,7 +2289,6 @@
                         html += '<option value="' + Utils.escapeHtml(name) + '" ' + sel + '>' + Utils.escapeHtml(name) + '</option>';
                     });
                     html += '</select>';
-                    // 🔑 placeholder "0" вместо value, если 0
                     html += '<input type="number" value="' + Utils.numToInput(svc.amount) + '" min="0" step="10" data-car-svc-amount="' + c.id + '" data-car-svc-idx="' + sidx + '" placeholder="0">';
                     html += '<select class="payment-select ' + payCls + '" data-car-svc-payment="' + c.id + '" data-car-svc-idx="' + sidx + '">';
                     html += '<option value="">—</option>';
@@ -2488,7 +2497,6 @@
                     html += '<option value="' + Utils.escapeHtml(m.name) + '" ' + sel + '>' + Utils.escapeHtml(m.name) + '</option>';
                 });
                 html += '</select>';
-                // 🔑 placeholder "0" вместо value, если 0
                 html += '<input type="number" class="amount" value="' + Utils.numToInput(a.amount) + '" min="0" step="100" data-adv-amount="' + a.id + '" placeholder="0">';
                 html += '<button class="del" data-adv-del="' + a.id + '">✕</button>';
                 html += '</div>';
@@ -2536,7 +2544,6 @@
                 total += Number(e.amount) || 0;
                 html += '<div class="cash-list-item">';
                 html += '<input type="text" value="' + Utils.escapeHtml(e.description || '') + '" placeholder="на что" data-exp-desc="' + e.id + '">';
-                // 🔑 placeholder "0" вместо value, если 0
                 html += '<input type="number" class="amount" value="' + Utils.numToInput(e.amount) + '" min="0" step="100" data-exp-amount="' + e.id + '" placeholder="0">';
                 html += '<button class="del" data-exp-del="' + e.id + '">✕</button>';
                 html += '</div>';
@@ -2636,13 +2643,11 @@
             });
             UI.$('addMarkBtn').addEventListener('click', Zarp.openMarkModal);
 
-            // 🔑 Кнопка «↻ Обновить» в шапке
             UI.$('refreshZarpBtn').addEventListener('click', function() {
                 Zarp.fullRefresh(this);
             });
         },
 
-        // 🔑 Полная перезагрузка месяца (сбрасывает кэш)
         fullRefresh: function(btn) {
             if (Zarp._refreshing) return;
             Zarp._refreshing = true;
@@ -2651,7 +2656,6 @@
             btn.disabled = true;
 
             var currentKey = State.zarpYear + '_' + State.zarpMonth;
-            // Сбрасываем кэш текущего месяца и перезагружаем
             State.salaryMonthData = null;
             State.salaryMonthLoadedKey = null;
             SalaryCache.clear(currentKey);
@@ -3332,7 +3336,6 @@
                 UI.toast('Обновлено', 'success', 1500);
             });
 
-            // 🔑 Кнопка «↻ Обновить» на вкладке Новая запись
             var refreshNR = UI.$('refreshNewRecordBtn');
             if (refreshNR) {
                 refreshNR.addEventListener('click', function() {
@@ -3461,7 +3464,6 @@
             window.Tetradka = Tetradka;
         },
 
-        // 🔑 Обновление данных на вкладке Новая запись
         refreshNewRecord: function(btn) {
             var originalText = btn.textContent;
             btn.textContent = '⏳';
@@ -3475,7 +3477,6 @@
             Api.getBootstrap().then(function(data) {
                 if (data && !data.error) {
                     App.applyBootstrap(data);
-                    // 🔑 Перерисовываем слоты и клиентов
                     NewRecord.renderSlots();
                     Journal.invalidate();
                     Clients.invalidate();
