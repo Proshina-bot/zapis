@@ -1,17 +1,17 @@
 /* ============================================================
- * PRO-шина · CRM — app.js v3.0
- * Финальная оптимизация после аудита.
+ * PRO-шина · CRM — app.js v3.1
  *
- * КЛЮЧЕВЫЕ ИСПРАВЛЕНИЯ:
- *  1. renderSlots: делегирование событий, без cloneNode
- *  2. applyBootstrap: правильный порядок merge optimistic
- *  3. Journal/Clients: версионный _renderVersion вместо _lastRenderKey
- *  4. saveRating: batch-запрос одним вызовом
- *  5. submit timeout: ping + точечная проверка (не полный bootstrap)
- *  6. total в renderSlots: исключает обед
- *  7. XSS: escapeHtml везде, data-attrs вместо inline onclick
- *  8. LocalCache: проверка isStale
- *  9. formatPhone: сохраняет позицию курсора
+ * ФИНАЛЬНЫЕ ИСПРАВЛЕНИЯ:
+ *  1. formatPhone: правильный ввод телефона без зеркалирования
+ *  2. renderSlots: делегирование событий, без cloneNode
+ *  3. applyBootstrap: правильный порядок merge optimistic
+ *  4. Journal/Clients: версионный _renderVersion
+ *  5. saveRating: batch-запрос одним вызовом
+ *  6. submit timeout: verifyRecordSaved (не полный bootstrap)
+ *  7. total в renderSlots: исключает обед
+ *  8. XSS: escapeHtml везде, data-attrs вместо inline onclick
+ *  9. LocalCache: проверка isStale
+ * 10. createRecord/delete/move без retry (устраняет дубли)
  * ============================================================ */
 
 (function() {
@@ -72,7 +72,6 @@
                 var parsed = JSON.parse(raw);
                 if (!parsed.ts) return null;
                 var age = Date.now() - parsed.ts;
-                // 🔑 Если старше MAX_AGE — не используем
                 if (age > Config.LOCAL_CACHE_MAX_AGE) return null;
                 return { data: parsed, age: age };
             } catch (e) { return null; }
@@ -124,7 +123,6 @@
         clientsDatabase: {},
         submitInFlight: {},
 
-        // 🔑 версии для инвалидации рендеров
         journalVersion: 0,
         clientsVersion: 0,
 
@@ -205,7 +203,6 @@
             return State.bootstrapInFlight;
         },
         getAll: function() { return Api._fetch({ action: 'getAll' }); },
-        // createRecord/delete/move — БЕЗ retry (устраняет дубли)
         createRecord: function(data) { return Api._fetch(Object.assign({ action: 'new' }, data), 0, 30000); },
         deleteRecord: function(slotKey) { return Api._fetch({ action: 'delete', slotKey: slotKey }, 0, 20000); },
         moveRecord: function(oldKey, newKey, data) {
@@ -214,7 +211,6 @@
         saveExtra: function(slotKey, extraComment, rating, phone) {
             return Api._fetch({ action: 'saveExtraComment', slotKey: slotKey, extraComment: extraComment, rating: rating, phone: phone }, 1, 20000);
         },
-        // 🔑 batch — один запрос на N ключей
         saveExtraBatch: function(keys, extraComment, rating) {
             return Api._fetch({
                 action: 'saveExtraBatch',
@@ -262,60 +258,68 @@
             });
             return out;
         },
-        // 🔑 formatPhone сохраняет курсор
-formatPhone: function(value, cursorPos) {
-    var digits = value.replace(/\D/g, '');
-    if (digits.length > 0 && (digits[0] === '7' || digits[0] === '8')) {
-        digits = digits.substring(1);
-    }
-    digits = digits.substring(0, 10);
 
-    var result = '+7';
-    if (digits.length > 0) {
-        result += ' (' + digits.substring(0, 3);
-        if (digits.length > 3) {
-            result += ') ' + digits.substring(3, 6);
-            if (digits.length > 6) {
-                result += '-' + digits.substring(6, 8);
-                if (digits.length > 8) {
-                    result += '-' + digits.substring(8, 10);
+        // 🔑 ФИНАЛЬНАЯ ВЕРСИЯ — не зеркалит, курсор не прыгает
+        formatPhone: function(value, cursorPos) {
+            // 1. Только цифры
+            var digits = value.replace(/\D/g, '');
+
+            // 2. Убираем ведущую 7/8 (код страны)
+            if (digits.length > 0 && (digits[0] === '7' || digits[0] === '8')) {
+                digits = digits.substring(1);
+            }
+            // 3. Максимум 10 цифр
+            digits = digits.substring(0, 10);
+
+            // 4. Собираем строку
+            var result = '+7';
+            if (digits.length > 0) {
+                result += ' (' + digits.substring(0, 3);
+                if (digits.length > 3) {
+                    result += ') ' + digits.substring(3, 6);
+                    if (digits.length > 6) {
+                        result += '-' + digits.substring(6, 8);
+                        if (digits.length > 8) {
+                            result += '-' + digits.substring(8, 10);
+                        }
+                    }
+                }
+            } else {
+                result += ' (';
+            }
+
+            // 5. Восстановление курсора
+            var cursor = cursorPos === undefined ? value.length : cursorPos;
+            var digitsBefore = value.substring(0, cursor).replace(/\D/g, '');
+            if (digitsBefore.length > 0 && (digitsBefore[0] === '7' || digitsBefore[0] === '8')) {
+                digitsBefore = digitsBefore.substring(1);
+            }
+            var digitCount = digitsBefore.length;
+
+            var newPos = result.length;
+            if (digitCount > 0) {
+                var seen = 0;
+                var skipLeading7 = true;
+                for (var i = 0; i < result.length; i++) {
+                    var ch = result[i];
+                    if (/\d/.test(ch)) {
+                        if (skipLeading7 && ch === '7') {
+                            skipLeading7 = false;
+                            continue;
+                        }
+                        skipLeading7 = false;
+                        seen++;
+                        if (seen >= digitCount) {
+                            newPos = i + 1;
+                            break;
+                        }
+                    }
                 }
             }
-        }
-    } else {
-        result += ' (';
-    }
 
-    var cursor = cursorPos === undefined ? value.length : cursorPos;
-    var digitsBefore = value.substring(0, cursor).replace(/\D/g, '');
-    if (digitsBefore.length > 0 && (digitsBefore[0] === '7' || digitsBefore[0] === '8')) {
-        digitsBefore = digitsBefore.substring(1);
-    }
-    var digitCount = digitsBefore.length;
+            return { value: result, cursor: newPos };
+        },
 
-    var newPos = result.length;
-    if (digitCount > 0) {
-        var seen = 0;
-        var skipLeading7 = true;
-        for (var i = 0; i < result.length; i++) {
-            var ch = result[i];
-            if (/\d/.test(ch)) {
-                if (skipLeading7 && ch === '7') {
-                    skipLeading7 = false;
-                    continue;
-                }
-                skipLeading7 = false;
-                seen++;
-                if (seen >= digitCount) {
-                    newPos = i + 1;
-                    break;
-                }
-            }
-        }
-    }
-
-    return { value: result, cursor: newPos };
-}
         cleanPhone: function(p) { return p ? p.replace(/\D/g, '') : ''; },
         capitalizeName: function(n) {
             if (!n) return n;
@@ -464,11 +468,6 @@ formatPhone: function(value, cursorPos) {
     // 📝 NEW RECORD
     // ============================================================
     var NewRecord = {
-        // 🔑 Кэш текущего рендера — для инкрементального обновления
-        _renderedRows: null,
-        _renderedDate: null,
-        _renderedBranch: null,
-
         initPhone: function() {
             var el = UI.$('phone');
             if (!el) return;
@@ -485,7 +484,6 @@ formatPhone: function(value, cursorPos) {
                 onChange: function() {
                     State.currentSelection = { date: null, time: null, car: null, slotKey: null };
                     UI.$('slotInfoBanner').classList.remove('show');
-                    NewRecord._renderedRows = null; // 🔑 force rebuild
                     NewRecord.renderSlots();
                 }
             });
@@ -497,7 +495,6 @@ formatPhone: function(value, cursorPos) {
                     State.currentBranch = this.dataset.branch;
                     State.currentSelection = { date: null, time: null, car: null, slotKey: null };
                     UI.$('slotInfoBanner').classList.remove('show');
-                    NewRecord._renderedRows = null; // 🔑 force rebuild
                     NewRecord.renderServicesGrid();
                     NewRecord.renderSlots();
                 });
@@ -533,7 +530,7 @@ formatPhone: function(value, cursorPos) {
             });
             UI.$('sizesGrid').appendChild(sizesFragment);
 
-            // 🔑 Телефон с сохранением курсора
+            // 🔑 Телефон: правильный ввод без зеркалирования
             var phoneEl = UI.$('phone');
             NewRecord.initPhone();
             phoneEl.addEventListener('focus', function() {
@@ -543,14 +540,14 @@ formatPhone: function(value, cursorPos) {
                     setTimeout(function() { self.setSelectionRange(self.value.length, self.value.length); }, 0);
                 }
             });
-phoneEl.addEventListener('input', function() {
-    var cursor = this.selectionStart;
-    var res = Utils.formatPhone(this.value, cursor);
-    this.value = res.value;
-    try { this.setSelectionRange(res.cursor, res.cursor); } catch (e) {}
-    App.checkClientByPhone();
-    NewRecord.updateSubmitState();
-});
+            phoneEl.addEventListener('input', function() {
+                var cursor = this.selectionStart;
+                var res = Utils.formatPhone(this.value, cursor);
+                this.value = res.value;
+                try { this.setSelectionRange(res.cursor, res.cursor); } catch (e) {}
+                App.checkClientByPhone();
+                NewRecord.updateSubmitState();
+            });
 
             UI.$('submitBtn').addEventListener('click', NewRecord.submit);
 
@@ -590,7 +587,7 @@ phoneEl.addEventListener('input', function() {
             grid.appendChild(fragment);
         },
 
-        // 🔑 ПОЛНОСТЬЮ ПЕРЕПИСАН: делегирование, без cloneNode
+        // 🔑 renderSlots: делегирование, без cloneNode
         renderSlots: function() {
             var date = UI.$('datePicker').value;
             if (!date) return;
@@ -599,9 +596,6 @@ phoneEl.addEventListener('input', function() {
             var slots = Utils.getTimeSlots(date);
             var currentBranch = State.currentBranch;
 
-            // 🔑 Решение: полная перестройка всегда, НО с делегированием клика
-            // Это на самом деле быстро, потому что innerHTML — один вызов,
-            // а не 72 addEventListener
             var html = '';
             var freeCount = 0;
             var totalSlots = 0;
@@ -669,7 +663,6 @@ phoneEl.addEventListener('input', function() {
 
             container.innerHTML = html;
 
-            // 🔑 Делегирование клика — один обработчик
             if (!container._hasDelegatedClick) {
                 container.addEventListener('click', function(e) {
                     var slotEl = e.target.closest('.slot');
@@ -688,7 +681,6 @@ phoneEl.addEventListener('input', function() {
             }
 
             UI.$('freeCounter').textContent = freeCount + ' свободно';
-            // 🔑 totalSlots НЕ включает обед — исправлено
             var booked = totalSlots - freeCount;
             var percent = totalSlots > 0 ? Math.round((booked / totalSlots) * 100) : 0;
             UI.updateLoadIndicator(percent);
@@ -759,12 +751,10 @@ phoneEl.addEventListener('input', function() {
                 payload.branch + '_' + payload.date + '_' + payload.time + '_' + payload.car
             );
 
-            // 🔑 1. Проверка двойной отправки
             if (State.submitInFlight[slotKey]) {
                 UI.toast('Уже отправляется...', 'warning', 1500);
                 return;
             }
-            // 🔑 2. Проверка что слот не занят ЧУЖОЙ записью (не нашей optimistic)
             var existing = State.occupiedSlots[slotKey];
             if (existing && !existing._optimistic) {
                 UI.toast('Слот уже занят', 'error');
@@ -772,7 +762,6 @@ phoneEl.addEventListener('input', function() {
                 return;
             }
 
-            // 🔑 Чистим зависшие optimistic
             var now = Date.now();
             Object.keys(State.occupiedSlots).forEach(function(k) {
                 var rec = State.occupiedSlots[k];
@@ -786,7 +775,6 @@ phoneEl.addEventListener('input', function() {
             submitBtn.disabled = true;
             UI.setLoading('submitBtn', true, 'submitText', 'Запись...');
 
-            // 🔑 3. Optimistic-запись
             State.occupiedSlots[slotKey] = {
                 services: State.selectedServices.slice(),
                 size: payload.size,
@@ -810,18 +798,14 @@ phoneEl.addEventListener('input', function() {
             submitBtn.disabled = false;
             UI.setLoading('submitBtn', false);
 
-            // 🔑 4. Отправка
             Api.createRecord(payload).then(function(res) {
                 delete State.submitInFlight[slotKey];
 
-                // Случай A: timeout / полный обрыв
                 if (res === null) {
                     UI.toast('Проверяем сохранение...', 'info', 2500);
-                    // 🔑 Проверяем точечно, а не через bootstrap
                     App.verifyRecordSaved(slotKey, payload, 0);
                     return;
                 }
-                // Случай B: серверная ошибка
                 if (res.error) {
                     delete State.occupiedSlots[slotKey];
                     App.removeClientByKey(slotKey);
@@ -834,7 +818,6 @@ phoneEl.addEventListener('input', function() {
                     UI.toast(res.error, 'error', 5000);
                     return;
                 }
-                // Случай C: успех
                 if (res.ok && res.slotKey && res.record) {
                     if (res.slotKey !== slotKey) {
                         delete State.occupiedSlots[slotKey];
@@ -1116,7 +1099,6 @@ phoneEl.addEventListener('input', function() {
             });
             grid.innerHTML = html;
 
-            // 🔑 Делегирование
             if (!grid._hasDelegatedClick) {
                 grid.addEventListener('click', function(e) {
                     var btn = e.target.closest('.move-slot-btn:not([disabled])');
@@ -1138,11 +1120,10 @@ phoneEl.addEventListener('input', function() {
     // 📓 JOURNAL
     // ============================================================
     var Journal = {
-        _lastVersion: -1,
-        invalidate: function() { Journal._lastVersion = -1; },
+        _lastRenderKey: '',
+        invalidate: function() { Journal._lastRenderKey = ''; },
         render: function() {
             var q = UI.$('journalSearch').value.toLowerCase().trim();
-            // 🔑 Версия + query = ключ. Любое изменение данных → invalidate()
             var currentKey = q + '|' + State.journalVersion;
             if (currentKey === Journal._lastRenderKey) return;
             Journal._lastRenderKey = currentKey;
@@ -1305,9 +1286,10 @@ phoneEl.addEventListener('input', function() {
             var ratio = Utils.calcRating(client);
             var stars = '★'.repeat(Math.round(ratio)) + '☆'.repeat(5 - Math.round(ratio));
 
-            var cars = Object.entries(client.cars).map(function(entry) {
-                return '<div class="modal-car-item"><div class="brand">' + Utils.escapeHtml(entry[0]) + '</div>' +
-                    '<div class="count">' + entry[1] + ' ' + (entry[1] === 1 ? 'визит' : 'визитов') + '</div></div>';
+            var cars = Object.keys(client.cars).map(function(brand) {
+                var count = client.cars[brand];
+                return '<div class="modal-car-item"><div class="brand">' + Utils.escapeHtml(brand) + '</div>' +
+                    '<div class="count">' + count + ' ' + (count === 1 ? 'визит' : 'визитов') + '</div></div>';
             }).join('');
 
             var history = client.history.slice(0, 30).map(function(h) {
@@ -1376,7 +1358,6 @@ phoneEl.addEventListener('input', function() {
             });
         },
 
-        // 🔑 ОДИН запрос на N ключей через saveExtraBatch
         saveRating: function(phone, rating) {
             var target = rating || 'neutral';
             var keys = [];
@@ -1386,13 +1367,11 @@ phoneEl.addEventListener('input', function() {
             });
             if (keys.length === 0) { UI.toast('Нет записей клиента', 'warning'); return; }
 
-            // Оптимистично
             keys.forEach(function(k) { State.occupiedSlots[k].rating = target; });
             App.rebuildClients();
             Clients.invalidate();
             Clients.render();
 
-            // 🔑 Один batch-запрос вместо N
             Api.saveExtraBatch(keys, undefined, target).then(function(res) {
                 if (res && res.ok && res.updated) {
                     var updated = res.updated;
@@ -1409,7 +1388,6 @@ phoneEl.addEventListener('input', function() {
                     if (UI.$('page-tetradka').classList.contains('active')) Tetradka.renderAll();
                     UI.toast('Рейтинг обновлён', 'success');
                 } else {
-                    // Откат
                     App.bootstrap();
                     UI.toast('Ошибка обновления', 'error');
                 }
@@ -1423,7 +1401,7 @@ phoneEl.addEventListener('input', function() {
     };
 
     // ============================================================
-    // 💰 PRICES (без изменений, но проверен)
+    // 💰 PRICES
     // ============================================================
     var Prices = {
         get: function(branch) { return State.prices[branch] || null; },
@@ -2929,10 +2907,7 @@ phoneEl.addEventListener('input', function() {
 
         removeClientByKey: function(slotKey) {
             var rec = State.occupiedSlots[slotKey];
-            if (!rec) {
-                // Может уже удалили — попробуем найти в клиентах
-                return;
-            }
+            if (!rec) return;
             var phone = Utils.cleanPhone(rec.phone);
             var c = State.clientsDatabase[phone];
             if (!c) return;
@@ -2952,7 +2927,6 @@ phoneEl.addEventListener('input', function() {
             State.journalVersion++;
         },
 
-        // 🔑 Точечная проверка после timeout
         verifyRecordSaved: function(slotKey, payload, attempt) {
             attempt = attempt || 0;
             if (attempt > 3) {
@@ -2960,8 +2934,6 @@ phoneEl.addEventListener('input', function() {
                 App.bootstrap();
                 return;
             }
-            // Проверяем через bootstrap-кэш: если Apps Script ещё думает — получим старые данные
-            // Поэтому просто делаем getAll и смотрим, есть ли ключ
             Api.getAll().then(function(res) {
                 if (!res || res.error) {
                     setTimeout(function() {
@@ -2971,7 +2943,6 @@ phoneEl.addEventListener('input', function() {
                 }
                 var normalized = Utils.normalizeAllKeys(res);
                 if (normalized[slotKey]) {
-                    // Сохранилось
                     State.occupiedSlots = normalized;
                     App.rebuildClients();
                     App.saveToCache();
@@ -2983,7 +2954,6 @@ phoneEl.addEventListener('input', function() {
                     App.updateStats();
                     UI.toast('✓ Запись подтверждена', 'success', 1500);
                 } else {
-                    // Не сохранилось — убираем optimistic
                     delete State.occupiedSlots[slotKey];
                     App.removeClientByKey(slotKey);
                     App.rebuildClients();
@@ -3010,28 +2980,23 @@ phoneEl.addEventListener('input', function() {
             });
         },
 
-        // 🔑 ИСПРАВЛЕНО: правильный порядок merge
         applyBootstrap: function(data) {
             if (!data) return;
 
             if (data.records && !data.records.error) {
                 var normalized = Utils.normalizeAllKeys(data.records);
 
-                // Собираем optimistic-ключи, которых НЕТ в серверных данных
                 var now = Date.now();
                 var optimisticToKeep = {};
                 Object.keys(State.occupiedSlots).forEach(function(key) {
                     var local = State.occupiedSlots[key];
                     if (!local || !local._optimistic) return;
-                    // TTL истёк — пропускаем
                     if ((now - (local._optimisticAt || 0)) > Config.OPTIMISTIC_TTL) return;
-                    // Сервер уже знает — не добавляем (перезапишется серверными)
                     if (normalized[key]) return;
                     optimisticToKeep[key] = local;
                 });
 
                 State.occupiedSlots = normalized;
-                // Добавляем optimistic, которых нет на сервере
                 Object.keys(optimisticToKeep).forEach(function(key) {
                     State.occupiedSlots[key] = optimisticToKeep[key];
                 });
@@ -3145,14 +3110,13 @@ phoneEl.addEventListener('input', function() {
             Object.keys(State.clientsDatabase).forEach(function(k) {
                 var c = State.clientsDatabase[k];
                 c.history.sort(function(a, b) {
-                    return (String(b.date || '') + String(a.time || '')).localeCompare(String(a.date || '') + String(b.time || ''));
+                    return (String(b.date || '') + String(b.time || '')).localeCompare(String(a.date || '') + String(a.time || ''));
                 });
             });
             State.clientsVersion++;
             State.journalVersion++;
         },
 
-        // 🔑 Исправлено: total без обеда
         updateStats: function() {
             var date = UI.$('datePicker').value;
             if (date) {
@@ -3339,7 +3303,6 @@ phoneEl.addEventListener('input', function() {
                 Journal.render();
             }, 200));
 
-            // 🔑 Делегирование закрытия модалок (data-close-modal)
             document.addEventListener('click', function(e) {
                 var closeBtn = e.target.closest('[data-close-modal]');
                 if (closeBtn) {
@@ -3351,7 +3314,6 @@ phoneEl.addEventListener('input', function() {
                 }
             });
 
-            // Клик по оверлею
             UI.$('clientModal').addEventListener('click', function(e) {
                 if (e.target === UI.$('clientModal')) Clients.closeModal();
             });
@@ -3410,13 +3372,11 @@ phoneEl.addEventListener('input', function() {
             flatpickr.localize(flatpickr.l10ns.ru);
             State.tetradkaDate = new Date().toISOString().slice(0, 10);
 
-            // Keepalive ping — warm-up + не даём заснуть
             setTimeout(function() { Api.ping(); }, 500);
             setInterval(function() {
                 if (!document.hidden) Api.ping();
             }, 240000);
 
-            // Чистка зависших optimistic
             setInterval(function() {
                 var now = Date.now();
                 var had = false;
