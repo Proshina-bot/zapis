@@ -19,7 +19,7 @@
 
     var Config = {
         // 🔑 READ — чтение
-        APPS_SCRIPT_URL_READ: 'https://script.google.com/macros/s/AKfycbzcJW5slZXZ45I4LNbiJhaBFRyyDD4r9-xf9rOzNW_zvK5-VvoZrlFPRchRkgcmdDh7Hw/exec',
+        APPS_SCRIPT_URL_READ: 'https://script.google.com/macros/s/AKfycbw1_34-xP15MuenSVFVBinIZ7al95PlwvAwHKVyP1QaOP4l1G4Iq-orBDTjAAqPn9_KqQ/exec',
         // 🔑 WRITE — запись
         APPS_SCRIPT_URL_WRITE: 'https://script.google.com/macros/s/AKfycbwdaOwN_TsNXX5binY31wIZAcYijPw30n7kt7p5Hcb8r_9pU4DaMHLDwDKz0MnuvBpUCg/exec',
 
