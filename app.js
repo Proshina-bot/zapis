@@ -263,37 +263,73 @@
             return out;
         },
         // 🔑 formatPhone сохраняет курсор
-        formatPhone: function(value, cursorPos) {
-            var d = value.replace(/\D/g, '');
-            // Отрезаем ведущую 7/8
-            if (d.length > 0 && (d[0] === '7' || d[0] === '8')) d = d.substring(1);
-            d = d.substring(0, 10);
+formatPhone: function(value, cursorPos) {
+    // 1. Только цифры
+    var digits = value.replace(/\D/g, '');
 
-            var r = '+7 (';
-            if (d.length > 0) r += ' ' + d.substring(0, 3);
-            if (d.length >= 4) r += ') ' + d.substring(3, 6);
-            if (d.length >= 7) r += '-' + d.substring(6, 8);
-            if (d.length >= 9) r += '-' + d.substring(8, 10);
+    // 2. Убираем ведущую 7/8 (код страны)
+    if (digits.length > 0 && (digits[0] === '7' || digits[0] === '8')) {
+        digits = digits.substring(1);
+    }
+    // 3. Максимум 10 цифр
+    digits = digits.substring(0, 10);
 
-            // 🔑 Восстанавливаем курсор
-            if (cursorPos !== undefined && cursorPos >= 0) {
-                // Считаем сколько цифр было слева от курсора в старом значении
-                var digitsBefore = value.substring(0, cursorPos).replace(/\D/g, '').length;
-                if (digitsBefore > 0 && (value.replace(/\D/g, '')[0] === '7' || value.replace(/\D/g, '')[0] === '8')) {
-                    digitsBefore--;
+    // 4. Собираем строку
+    var result = '+7';
+    if (digits.length > 0) {
+        result += ' (' + digits.substring(0, 3);
+        if (digits.length > 3) {
+            result += ') ' + digits.substring(3, 6);
+            if (digits.length > 6) {
+                result += '-' + digits.substring(6, 8);
+                if (digits.length > 8) {
+                    result += '-' + digits.substring(8, 10);
                 }
-                // Ищем позицию для этого кол-ва цифр в новом значении
-                var newPos = 0;
-                var foundDigits = 0;
-                for (var i = 0; i < r.length; i++) {
-                    if (/\d/.test(r[i])) foundDigits++;
-                    if (foundDigits > digitsBefore) break;
-                    newPos++;
-                }
-                return { value: r, cursor: Math.max(0, newPos) };
             }
-            return { value: r, cursor: r.length };
-        },
+        }
+    } else {
+        result += ' (';
+    }
+
+    // 5. Восстановление курсора
+    // Считаем, сколько ЦИФР было в старом значении слева от курсора
+    // (без учёта ведущей 7, которую мы отбрасываем)
+    var cursor = cursorPos === undefined ? value.length : cursorPos;
+    var digitsBefore = value.substring(0, cursor).replace(/\D/g, '');
+    // Отрезаем ведущую 7 если она была в старом значении
+    if (digitsBefore.length > 0 && (digitsBefore[0] === '7' || digitsBefore[0] === '8')) {
+        digitsBefore = digitsBefore.substring(1);
+    }
+    var digitCount = digitsBefore.length;
+
+    // Ищем позицию в новом результате, где окажется digitCount цифр (не считая +7)
+    var newPos = result.length;
+    if (digitCount === 0) {
+        // Курсор после "("
+        newPos = result.length;
+    } else {
+        var seen = 0;
+        var skipLeading7 = true;
+        for (var i = 0; i < result.length; i++) {
+            var ch = result[i];
+            if (/\d/.test(ch)) {
+                if (skipLeading7 && ch === '7') {
+                    // Пропускаем только первую 7 (код страны)
+                    skipLeading7 = false;
+                    continue;
+                }
+                skipLeading7 = false;
+                seen++;
+                if (seen >= digitCount) {
+                    newPos = i + 1;
+                    break;
+                }
+            }
+        }
+    }
+
+    return { value: result, cursor: newPos };
+}
         cleanPhone: function(p) { return p ? p.replace(/\D/g, '') : ''; },
         capitalizeName: function(n) {
             if (!n) return n;
@@ -521,14 +557,14 @@
                     setTimeout(function() { self.setSelectionRange(self.value.length, self.value.length); }, 0);
                 }
             });
-            phoneEl.addEventListener('input', function() {
-                var cursor = this.selectionStart;
-                var res = Utils.formatPhone(this.value, cursor);
-                this.value = res.value;
-                try { this.setSelectionRange(res.cursor, res.cursor); } catch (e) {}
-                App.checkClientByPhone();
-                NewRecord.updateSubmitState();
-            });
+phoneEl.addEventListener('input', function() {
+    var cursor = this.selectionStart;
+    var res = Utils.formatPhone(this.value, cursor);
+    this.value = res.value;
+    try { this.setSelectionRange(res.cursor, res.cursor); } catch (e) {}
+    App.checkClientByPhone();
+    NewRecord.updateSubmitState();
+});
 
             UI.$('submitBtn').addEventListener('click', NewRecord.submit);
 
