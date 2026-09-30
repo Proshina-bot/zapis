@@ -2679,18 +2679,20 @@ _fetch: function(params, retries, timeout, noCors) {
                 if (State.zarpMonth > 11) { State.zarpMonth = 0; State.zarpYear++; }
                 Zarp.loadAndRender();
             });
-            UI.$('closeMonthBtn').addEventListener('click', function() {
-                if (!confirm('Закрыть месяц? Остатки перенесутся на следующий месяц.')) return;
-                Api.closeMonth({ year: State.zarpYear, month: State.zarpMonth, branch: State.zarpBranch }).then(function(res) {
-                    if (res && !res.error) {
-                        UI.toast('Месяц закрыт', 'success');
-                        State.salaryMonthData = null;
-                        State.salaryMonthLoadedKey = null;
-                        SalaryCache.clearAll();
-                        Zarp.loadAndRender(true);
-                    } else UI.toast('Ошибка', 'error');
-                });
-            });
+UI.$('closeMonthBtn').addEventListener('click', function() {
+    if (!confirm('Закрыть месяц?\n\nОстатки перенесутся на следующий месяц для ОБОИХ филиалов.')) return;
+    Api.closeMonth({ year: State.zarpYear, month: State.zarpMonth }).then(function(res) {
+        if (res && !res.error) {
+            UI.toast('Месяц закрыт для обоих филиалов', 'success', 2500);
+            State.salaryMonthData = null;
+            State.salaryMonthLoadedKey = null;
+            SalaryCache.clearAll();
+            Zarp.loadAndRender(true);
+        } else {
+            UI.toast((res && res.error) || 'Ошибка', 'error');
+        }
+    });
+});
             UI.$('addMarkBtn').addEventListener('click', Zarp.openMarkModal);
 
             UI.$('refreshZarpBtn').addEventListener('click', function() {
