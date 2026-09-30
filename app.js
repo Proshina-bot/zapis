@@ -154,29 +154,61 @@
     };
 
     var Api = {
-_fetchWithTimeout: function(url, timeout, noCors) {
+_fetchWithTimeout: function(url, timeout, opts) {
     return new Promise(function(resolve, reject) {
         var controller = new AbortController();
         var timer = setTimeout(function() { controller.abort(); reject(new Error('timeout')); }, timeout);
-
-        // 🔑 no-cors для write-запросов, чтобы обойти CORS
-        var opts = { signal: controller.signal };
-        if (noCors) opts.mode = 'no-cors';
-
-        fetch(url, opts)
+        var fetchOpts = Object.assign({ signal: controller.signal }, opts || {});
+        fetch(url, fetchOpts)
             .then(function(res) {
                 clearTimeout(timer);
-                // При no-cors status всегда 0 (opaque), но данные на сервере сохраняются
-                if (noCors) {
-                    resolve({ __noCorsResponse: true });
-                } else if (!res.ok) {
-                    reject(new Error('HTTP ' + res.status));
-                } else {
-                    resolve(res);
-                }
+                if (!res.ok) reject(new Error('HTTP ' + res.status));
+                else resolve(res);
             })
             .catch(function(e) { clearTimeout(timer); reject(e); });
     });
+},
+
+// 🔑 _fetch с поддержкой POST
+_fetch: function(params, retries, timeout, usePost) {
+    retries = (retries === undefined) ? Config.MAX_RETRIES : retries;
+    timeout = timeout || Config.FETCH_TIMEOUT;
+    var self = this;
+    var attempt = 0;
+
+    var url, opts;
+    if (usePost) {
+        // 🔑 POST — данные в body, не в query string
+        url = Config.APPS_SCRIPT_URL;
+        var body = new URLSearchParams(
+            Object.assign({}, params, { _: Date.now() })
+        ).toString();
+        opts = {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+            body: body,
+            // 🔑 Важно: без redirect follow (чтобы CORS работал)
+            redirect: 'follow'
+        };
+    } else {
+        // GET (для мелких запросов)
+        url = Config.APPS_SCRIPT_URL + '?' + new URLSearchParams(
+            Object.assign({}, params, { _: Date.now() })
+        ).toString();
+        opts = {};
+    }
+
+    function tryOnce() {
+        return self._fetchWithTimeout(url, timeout, opts)
+            .then(function(res) { return res.json(); })
+            .catch(function(e) {
+                console.warn('API fail:', e.message, params.action);
+                if (attempt >= retries) { return null; }
+                attempt++;
+                return new Promise(function(r) { setTimeout(r, 400); }).then(tryOnce);
+            });
+    }
+    return tryOnce();
 },
 _fetch: function(params, retries, timeout, noCors) {
     retries = (retries === undefined) ? Config.MAX_RETRIES : retries;
@@ -214,35 +246,38 @@ _fetch: function(params, retries, timeout, noCors) {
             return State.bootstrapInFlight;
         },
         getAll: function() { return Api._fetch({ action: 'getAll' }); },
-        createRecord: function(data) { return Api._fetch(Object.assign({ action: 'new' }, data), 0, 20000); },
-        deleteRecord: function(slotKey) { return Api._fetch({ action: 'delete', slotKey: slotKey }, 0, 20000); },
-        moveRecord: function(oldKey, newKey, data) {
-            return Api._fetch(Object.assign({ action: 'move', oldSlotKey: oldKey, newSlotKey: newKey }, data), 0, 20000);
-        },
-        saveExtra: function(slotKey, extraComment, rating, phone) {
-            return Api._fetch({ action: 'saveExtraComment', slotKey: slotKey, extraComment: extraComment, rating: rating, phone: phone }, 0, 20000);
-        },
-        saveExtraBatch: function(keys, extraComment, rating) {
-            return Api._fetch({
-                action: 'saveExtraBatch',
-                keys: JSON.stringify(keys),
-                extraComment: extraComment,
-                rating: rating
-            }, 0, 20000);
-        },
+createRecord: function(data) { return Api._fetch(Object.assign({ action: 'new' }, data), 0, 20000, true); },
+deleteRecord: function(slotKey) { return Api._fetch({ action: 'delete', slotKey: slotKey }, 0, 20000, true); },
+moveRecord: function(oldKey, newKey, data) {
+    return Api._fetch(Object.assign({ action: 'move', oldSlotKey: oldKey, newSlotKey: newKey }, data), 0, 20000, true);
+},
+saveExtra: function(slotKey, extraComment, rating, phone) {
+    return Api._fetch({ action: 'saveExtraComment', slotKey: slotKey, extraComment: extraComment, rating: rating, phone: phone }, 0, 20000, true);
+},
+saveExtraBatch: function(keys, extraComment, rating) {
+    return Api._fetch({
+        action: 'saveExtraBatch',
+        keys: JSON.stringify(keys),
+        extraComment: extraComment,
+        rating: rating
+    }, 0, 20000, true);
+},
         getPrices: function() { return Api._fetch({ action: 'getPrices' }); },
         getMasters: function() { return Api._fetch({ action: 'getMasters' }); },
         getSalaryDay: function(date, branch) { return Api._fetch({ action: 'getSalaryDay', date: date, branch: branch }); },
-        saveSalaryDay: function(data) { return Api._fetch(Object.assign({ action: 'saveSalaryDay' }, data), 0, 30000); },
+// 🔑 POST, чтобы избежать CORS-проблемы с большим GET
+saveSalaryDay: function(data) {
+    return Api._fetch(Object.assign({ action: 'saveSalaryDay' }, data), 0, 30000, true);
+},
         getSalaryMonth: function(year, month) {
             return Api._fetch({ action: 'getSalaryMonth', year: year, month: month }, Config.MAX_RETRIES_SALARY, Config.FETCH_TIMEOUT_SALARY);
         },
-        addMark: function(data) { return Api._fetch(Object.assign({ action: 'addMark' }, data), 0, 20000); },
-        deleteMark: function(id) { return Api._fetch({ action: 'deleteMark', id: id }, 0, 20000); },
-        closeMonth: function(data) { return Api._fetch(Object.assign({ action: 'closeMonth' }, data), 0, 30000); },
-        updateRecordStatus: function(recordKey, status) {
-            return Api._fetch({ action: 'updateRecordStatus', recordKey: recordKey, status: status }, 0, 15000);
-        },
+addMark: function(data) { return Api._fetch(Object.assign({ action: 'addMark' }, data), 0, 20000, true); },
+deleteMark: function(id) { return Api._fetch({ action: 'deleteMark', id: id }, 0, 20000, true); },
+closeMonth: function(data) { return Api._fetch(Object.assign({ action: 'closeMonth' }, data), 0, 30000, true); },
+updateRecordStatus: function(recordKey, status) {
+    return Api._fetch({ action: 'updateRecordStatus', recordKey: recordKey, status: status }, 0, 15000, true);
+},
         getRecordPayment: function(recordKey) {
             return Api._fetch({ action: 'getRecordPayment', recordKey: recordKey });
         }
