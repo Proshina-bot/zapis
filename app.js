@@ -13,7 +13,7 @@
     'use strict';
 
     var Config = {
-        APPS_SCRIPT_URL: 'https://script.google.com/macros/s/ВАШ_ID/exec',
+        APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbzHm6I_4sSUbU7QqYOFoEpF8Nsn6nv7Aph8alxJOddylQIfVLdb1Ksr1WnJctKitm2d/exec',
         CARS: ['1', '2', '3'],
         SIZES: ['R13','R14','R15','R16','R17','R18','R19','R20','R21','R22','R23'],
         REFRESH_INTERVAL: 120000,
