@@ -1,20 +1,19 @@
 /* ============================================================
- * PRO-шина · CRM — app.js v3.5
+ * PRO-шина · CRM — app.js v3.6
  *
- * ФИКСЫ ПЕРВОЙ ВОЛНЫ:
- *  - 🔴 Tetradka.loadDay: не создаём emptyDay при ошибке (защита от затирания)
- *  - 🔴 Tetradka.autoSave: блокировка при tetradkaLoadFailed
- *  - 🔴 Tetradka.saveInternal: блокировка при tetradkaLoadFailed
- *  - 🔴 Tetradka.fullRefresh: сброс флага при успехе
- *  - 🔴 Zarp.closeMonth: защита от двойного клика + показ skipped
- *  - 🔑 State.tetradkaLoadFailed — новый флаг
+ * ФИКСЫ ВТОРОЙ ВОЛНЫ:
+ *  - POST для write-запросов (решает CORS с saveSalaryDay)
+ *  - GET для read-запросов
+ *  - Api.getVersion() — умный опрос (getVersion → bootstrap только если изменилось)
+ *  - Utils.getTimeSlots: фикс UTC-парсинга (T00:00:00)
+ *  - State.lastDataVersion — запоминаем версию данных
  * ============================================================ */
 
 (function() {
     'use strict';
 
     var Config = {
-        APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbz9wEqRvw9M29TJNyrHWjSCu2lZKtCuE72LGOGV9QAy0neUIfATD-zUqCeQJmGDza8d/exec',
+        APPS_SCRIPT_URL: 'https://script.google.com/macros/s/ВАШ_ID/exec',
         CARS: ['1', '2', '3'],
         SIZES: ['R13','R14','R15','R16','R17','R18','R19','R20','R21','R22','R23'],
         REFRESH_INTERVAL: 120000,
@@ -123,7 +122,6 @@
         journalVersion: 0,
         clientsVersion: 0,
 
-        // 🔑 НОВОЕ: флаг, что день не загрузился — блокирует сохранение
         tetradkaLoadFailed: false,
 
         currentBranch: 'ryabinina',
@@ -153,18 +151,22 @@
 
         isUpdating: false,
         lastBootstrapAt: 0,
-        bootstrapInFlight: null
+        bootstrapInFlight: null,
+
+        // 🔑 версия данных (для умного опроса)
+        lastDataVersion: null
     };
 
     // ============================================================
     // 🌐 API
     // ============================================================
     var Api = {
-        _fetchWithTimeout: function(url, timeout) {
+        _fetchWithTimeout: function(url, timeout, opts) {
             return new Promise(function(resolve, reject) {
                 var controller = new AbortController();
                 var timer = setTimeout(function() { controller.abort(); reject(new Error('timeout')); }, timeout);
-                fetch(url, { signal: controller.signal })
+                var fetchOpts = Object.assign({ signal: controller.signal }, opts || {});
+                fetch(url, fetchOpts)
                     .then(function(res) {
                         clearTimeout(timer);
                         if (!res.ok) reject(new Error('HTTP ' + res.status));
@@ -173,16 +175,33 @@
                     .catch(function(e) { clearTimeout(timer); reject(e); });
             });
         },
-        _fetch: function(params, retries, timeout) {
+
+        // 🔑 _fetch с поддержкой POST
+        _fetch: function(params, retries, timeout, usePost) {
             retries = (retries === undefined) ? Config.MAX_RETRIES : retries;
             timeout = timeout || Config.FETCH_TIMEOUT;
-            var url = Config.APPS_SCRIPT_URL + '?' + new URLSearchParams(
-                Object.assign({}, params, { _: Date.now() })
-            ).toString();
             var self = this;
             var attempt = 0;
+
+            var url, opts;
+            if (usePost) {
+                // 🔑 POST — body JSON, content-type text/plain (без preflight)
+                url = Config.APPS_SCRIPT_URL;
+                opts = {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify(Object.assign({}, params, { _: Date.now() }))
+                };
+            } else {
+                // GET — маленькие запросы
+                url = Config.APPS_SCRIPT_URL + '?' + new URLSearchParams(
+                    Object.assign({}, params, { _: Date.now() })
+                ).toString();
+                opts = {};
+            }
+
             function tryOnce() {
-                return self._fetchWithTimeout(url, timeout)
+                return self._fetchWithTimeout(url, timeout, opts)
                     .then(function(res) { return res.json(); })
                     .catch(function(e) {
                         if (attempt >= retries) { return null; }
@@ -192,7 +211,14 @@
             }
             return tryOnce();
         },
+
         ping: function() { return Api._fetch({ action: 'ping' }, 0, 5000); },
+
+        // 🔑 Лёгкий запрос версии
+        getVersion: function() {
+            return Api._fetch({ action: 'getVersion' }, 0, 5000);
+        },
+
         getBootstrap: function() {
             if (State.bootstrapInFlight) return State.bootstrapInFlight;
             State.bootstrapInFlight = Api._fetch({ action: 'getBootstrap' }, 2, 25000).then(function(r) {
@@ -203,13 +229,19 @@
             return State.bootstrapInFlight;
         },
         getAll: function() { return Api._fetch({ action: 'getAll' }); },
-        createRecord: function(data) { return Api._fetch(Object.assign({ action: 'new' }, data), 0, 20000); },
-        deleteRecord: function(slotKey) { return Api._fetch({ action: 'delete', slotKey: slotKey }, 0, 20000); },
+
+        // 🔑 WRITE-запросы → POST
+        createRecord: function(data) {
+            return Api._fetch(Object.assign({ action: 'new' }, data), 0, 20000, true);
+        },
+        deleteRecord: function(slotKey) {
+            return Api._fetch({ action: 'delete', slotKey: slotKey }, 0, 20000, true);
+        },
         moveRecord: function(oldKey, newKey, data) {
-            return Api._fetch(Object.assign({ action: 'move', oldSlotKey: oldKey, newSlotKey: newKey }, data), 0, 20000);
+            return Api._fetch(Object.assign({ action: 'move', oldSlotKey: oldKey, newSlotKey: newKey }, data), 0, 20000, true);
         },
         saveExtra: function(slotKey, extraComment, rating, phone) {
-            return Api._fetch({ action: 'saveExtraComment', slotKey: slotKey, extraComment: extraComment, rating: rating, phone: phone }, 0, 20000);
+            return Api._fetch({ action: 'saveExtraComment', slotKey: slotKey, extraComment: extraComment, rating: rating, phone: phone }, 0, 20000, true);
         },
         saveExtraBatch: function(keys, extraComment, rating) {
             return Api._fetch({
@@ -217,20 +249,30 @@
                 keys: JSON.stringify(keys),
                 extraComment: extraComment,
                 rating: rating
-            }, 0, 20000);
+            }, 0, 20000, true);
         },
+        saveSalaryDay: function(data) {
+            return Api._fetch(Object.assign({ action: 'saveSalaryDay' }, data), 0, 30000, true);
+        },
+        addMark: function(data) {
+            return Api._fetch(Object.assign({ action: 'addMark' }, data), 0, 20000, true);
+        },
+        deleteMark: function(id) {
+            return Api._fetch({ action: 'deleteMark', id: id }, 0, 20000, true);
+        },
+        closeMonth: function(data) {
+            return Api._fetch(Object.assign({ action: 'closeMonth' }, data), 0, 30000, true);
+        },
+        updateRecordStatus: function(recordKey, status) {
+            return Api._fetch({ action: 'updateRecordStatus', recordKey: recordKey, status: status }, 0, 15000, true);
+        },
+
+        // 🔑 READ-запросы → GET
         getPrices: function() { return Api._fetch({ action: 'getPrices' }); },
         getMasters: function() { return Api._fetch({ action: 'getMasters' }); },
         getSalaryDay: function(date, branch) { return Api._fetch({ action: 'getSalaryDay', date: date, branch: branch }); },
-        saveSalaryDay: function(data) { return Api._fetch(Object.assign({ action: 'saveSalaryDay' }, data), 0, 30000); },
         getSalaryMonth: function(year, month) {
             return Api._fetch({ action: 'getSalaryMonth', year: year, month: month }, Config.MAX_RETRIES_SALARY, Config.FETCH_TIMEOUT_SALARY);
-        },
-        addMark: function(data) { return Api._fetch(Object.assign({ action: 'addMark' }, data), 0, 20000); },
-        deleteMark: function(id) { return Api._fetch({ action: 'deleteMark', id: id }, 0, 20000); },
-        closeMonth: function(data) { return Api._fetch(Object.assign({ action: 'closeMonth' }, data), 0, 30000); },
-        updateRecordStatus: function(recordKey, status) {
-            return Api._fetch({ action: 'updateRecordStatus', recordKey: recordKey, status: status }, 0, 15000);
         },
         getRecordPayment: function(recordKey) {
             return Api._fetch({ action: 'getRecordPayment', recordKey: recordKey });
@@ -325,9 +367,11 @@
             var p = String(s).split('-');
             return p.length === 3 ? p[2] + '.' + p[1] + '.' + p[0] : s;
         },
+
+        // 🔑 ФИКС UTC-парсинга: 'YYYY-MM-DD' + 'T00:00:00'
         getTimeSlots: function(date) {
             if (!date) return [];
-            var d = new Date(date);
+            var d = new Date(date + 'T00:00:00');
             var isWeekend = d.getDay() === 0 || d.getDay() === 6;
             var start = isWeekend ? 10 : 9;
             var end = isWeekend ? 20 : 21;
@@ -1650,7 +1694,7 @@
             UI.$('saveTetradkaBtn').addEventListener('click', Tetradka.manualSave);
 
             window.addEventListener('beforeunload', function() {
-                if (Tetradka._hasChanges) {
+                if (Tetradka._hasChanges && !State.tetradkaLoadFailed) {
                     var d = Tetradka.getCurrent();
                     if (d) {
                         var mastersData = [];
@@ -1750,10 +1794,10 @@
 
             var doLoad = function() {
                 State.tetradkaLoaded[State.tetradkaBranch] = false;
-                State.tetradkaLoadFailed = false;  // 🔑 сбрасываем флаг перед загрузкой
+                State.tetradkaLoadFailed = false;
                 Api.getSalaryDay(d.date, d.branch).then(function(res) {
                     if (res && !res.error) {
-                        State.tetradkaLoadFailed = false;  // 🔑 сбрасываем
+                        State.tetradkaLoadFailed = false;
                         Tetradka.applyServerData(d.branch, d.date, res);
                         State.tetradkaLoaded[d.branch] = true;
                         Tetradka._lastSavedAt = new Date();
@@ -1762,7 +1806,7 @@
                         Tetradka.renderAll();
                         UI.toast('Данные обновлены', 'success', 1500);
                     } else {
-                        State.tetradkaLoadFailed = true;  // 🔑 ставим флаг
+                        State.tetradkaLoadFailed = true;
                         UI.toast('Не удалось обновить', 'error');
                     }
                     Tetradka._refreshingFull = false;
@@ -1793,11 +1837,9 @@
             Tetradka._autoSaveTimer = setTimeout(function() { Tetradka.autoSave(); }, Config.AUTOSAVE_INTERVAL);
         },
 
-        // 🔑 Блокировка автосохранения, если день не загрузился
         autoSave: function() {
             if (!Tetradka._hasChanges) return Promise.resolve(true);
             if (Tetradka._isSaving) return Promise.resolve(false);
-            // 🔑 КРИТИЧНО: если день не загрузился — НЕ сохраняем
             if (State.tetradkaLoadFailed) {
                 Tetradka.updateSaveStatus('error');
                 return Promise.resolve(false);
@@ -1829,7 +1871,6 @@
         manualSave: function() {
             var d = Tetradka.getCurrent();
             if (!d) return;
-            // 🔑 Блокируем, если день не загрузился
             if (State.tetradkaLoadFailed) {
                 UI.toast('Сначала загрузите данные дня (↻ Обновить)', 'error', 4000);
                 return;
@@ -1853,9 +1894,7 @@
             });
         },
 
-        // 🔑 Блокировка прямого сохранения, если день не загрузился
         saveInternal: function() {
-            // 🔑 КРИТИЧНО: если день не загрузился — НЕ сохраняем
             if (State.tetradkaLoadFailed) {
                 return Promise.resolve(false);
             }
@@ -1913,7 +1952,6 @@
             }
         },
 
-        // 🔑 КРИТИЧНО: при ошибке НЕ создаём emptyDay
         loadDay: function(force) {
             var date = State.tetradkaDate;
             var branch = State.tetradkaBranch;
@@ -1926,17 +1964,14 @@
                 UI.$('carsList').innerHTML = '<div class="skeleton" style="height:80px"></div>';
             }
             Api.getSalaryDay(date, branch).then(function(res) {
-                // 🔑 КРИТИЧНО: при ошибке НЕ создаём emptyDay
                 if (!res || res.error) {
                     State.tetradkaLoadFailed = true;
                     var d = State.tetradka[branch];
                     if (d && d.date === date) {
-                        // Данные этого дня уже есть в памяти — оставляем
                         Tetradka._hasChanges = false;
                         Tetradka.updateSaveStatus('error');
                         Tetradka.renderAll();
                     } else {
-                        // Данных нет — показываем сообщение и кнопку
                         UI.$('carsList').innerHTML = '<div class="cash-empty" style="padding:20px;text-align:center">' +
                             '⚠️ Не удалось загрузить день<br><br>' +
                             '<button class="btn primary" onclick="Tetradka.fullRefresh()">↻ Повторить</button>' +
@@ -2683,8 +2718,6 @@
                 if (State.zarpMonth > 11) { State.zarpMonth = 0; State.zarpYear++; }
                 Zarp.loadAndRender();
             });
-
-            // 🔑 closeMonth с защитой от двойного клика + показ skipped
             UI.$('closeMonthBtn').addEventListener('click', function() {
                 if (!confirm('Закрыть месяц?\n\nОстатки перенесутся на следующий месяц для ОБОИХ филиалов.')) return;
                 var btn = this;
@@ -2707,9 +2740,7 @@
                     UI.toast('Ошибка сети при закрытии месяца', 'error');
                 });
             });
-
             UI.$('addMarkBtn').addEventListener('click', Zarp.openMarkModal);
-
             UI.$('refreshZarpBtn').addEventListener('click', function() {
                 Zarp.fullRefresh(this);
             });
@@ -3143,6 +3174,11 @@
         applyBootstrap: function(data) {
             if (!data) return;
 
+            // 🔑 Запоминаем версию данных
+            if (data.dataVersion !== undefined) {
+                State.lastDataVersion = String(data.dataVersion);
+            }
+
             if (data.records && !data.records.error) {
                 var normalized = Utils.normalizeAllKeys(data.records);
 
@@ -3397,6 +3433,7 @@
                 State.pricesLoaded = false;
                 State.tetradkaLoaded = { ryabinina: false, amundsena: false };
                 State.tetradkaLoadFailed = false;
+                State.lastDataVersion = null;  // 🔑 сброс версии
                 State.clientsDatabase = {};
                 Clients.invalidate();
                 Journal.invalidate();
@@ -3541,6 +3578,7 @@
             State.salaryMonthData = null;
             State.salaryMonthLoadedKey = null;
             State.pricesLoaded = false;
+            State.lastDataVersion = null;  // 🔑 сброс версии
 
             Api.getBootstrap().then(function(data) {
                 if (data && !data.error) {
@@ -3597,6 +3635,7 @@
 
             App.bootstrap();
 
+            // 🔑 Умный опрос: сначала getVersion, полный bootstrap только если изменилось
             setInterval(function() {
                 if (State.isUpdating || document.hidden || Tetradka._hasChanges) return;
 
@@ -3610,8 +3649,24 @@
                 });
                 if (hasOptimistic) return;
 
-                State.isUpdating = true;
-                App.bootstrap().then(function() { State.isUpdating = false; });
+                // 🔑 Лёгкий запрос версии (несколько байт вместо килобайт)
+                Api.getVersion().then(function(vres) {
+                    if (!vres || !vres.ok) return;
+                    var newV = String(vres.v || '0');
+                    if (State.lastDataVersion === null) {
+                        // Первый раз — запомнили, не грузим
+                        State.lastDataVersion = newV;
+                        return;
+                    }
+                    if (newV === State.lastDataVersion) {
+                        // Ничего не изменилось — не грузим
+                        return;
+                    }
+                    // 🔑 Версия изменилась — грузим полный bootstrap
+                    State.lastDataVersion = newV;
+                    State.isUpdating = true;
+                    App.bootstrap().then(function() { State.isUpdating = false; });
+                });
             }, Config.REFRESH_INTERVAL);
         }
     };
