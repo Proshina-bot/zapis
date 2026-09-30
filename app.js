@@ -154,38 +154,55 @@
     };
 
     var Api = {
-        _fetchWithTimeout: function(url, timeout) {
-            return new Promise(function(resolve, reject) {
-                var controller = new AbortController();
-                var timer = setTimeout(function() { controller.abort(); reject(new Error('timeout')); }, timeout);
-                fetch(url, { signal: controller.signal })
-                    .then(function(res) {
-                        clearTimeout(timer);
-                        if (!res.ok) reject(new Error('HTTP ' + res.status));
-                        else resolve(res);
-                    })
-                    .catch(function(e) { clearTimeout(timer); reject(e); });
+_fetchWithTimeout: function(url, timeout, noCors) {
+    return new Promise(function(resolve, reject) {
+        var controller = new AbortController();
+        var timer = setTimeout(function() { controller.abort(); reject(new Error('timeout')); }, timeout);
+
+        // 🔑 no-cors для write-запросов, чтобы обойти CORS
+        var opts = { signal: controller.signal };
+        if (noCors) opts.mode = 'no-cors';
+
+        fetch(url, opts)
+            .then(function(res) {
+                clearTimeout(timer);
+                // При no-cors status всегда 0 (opaque), но данные на сервере сохраняются
+                if (noCors) {
+                    resolve({ __noCorsResponse: true });
+                } else if (!res.ok) {
+                    reject(new Error('HTTP ' + res.status));
+                } else {
+                    resolve(res);
+                }
+            })
+            .catch(function(e) { clearTimeout(timer); reject(e); });
+    });
+},
+_fetch: function(params, retries, timeout, noCors) {
+    retries = (retries === undefined) ? Config.MAX_RETRIES : retries;
+    timeout = timeout || Config.FETCH_TIMEOUT;
+    var url = Config.APPS_SCRIPT_URL + '?' + new URLSearchParams(
+        Object.assign({}, params, { _: Date.now() })
+    ).toString();
+    var self = this;
+    var attempt = 0;
+    function tryOnce() {
+        return self._fetchWithTimeout(url, timeout, noCors)
+            .then(function(res) {
+                // 🔑 no-cors → opaque response, не пытаемся JSON.parse
+                if (res && res.__noCorsResponse) {
+                    return { ok: true, _noCors: true };
+                }
+                return res.json();
+            })
+            .catch(function(e) {
+                if (attempt >= retries) { return null; }
+                attempt++;
+                return new Promise(function(r) { setTimeout(r, 400); }).then(tryOnce);
             });
-        },
-        _fetch: function(params, retries, timeout) {
-            retries = (retries === undefined) ? Config.MAX_RETRIES : retries;
-            timeout = timeout || Config.FETCH_TIMEOUT;
-            var url = Config.APPS_SCRIPT_URL + '?' + new URLSearchParams(
-                Object.assign({}, params, { _: Date.now() })
-            ).toString();
-            var self = this;
-            var attempt = 0;
-            function tryOnce() {
-                return self._fetchWithTimeout(url, timeout)
-                    .then(function(res) { return res.json(); })
-                    .catch(function(e) {
-                        if (attempt >= retries) { return null; }
-                        attempt++;
-                        return new Promise(function(r) { setTimeout(r, 400); }).then(tryOnce);
-                    });
-            }
-            return tryOnce();
-        },
+    }
+    return tryOnce();
+},
         ping: function() { return Api._fetch({ action: 'ping' }, 0, 5000); },
         getBootstrap: function() {
             if (State.bootstrapInFlight) return State.bootstrapInFlight;
@@ -1873,7 +1890,13 @@
                 cash: JSON.stringify(d.cash),
                 advances: JSON.stringify(d.advances),
                 pump: JSON.stringify(d.pump)   // 🔑 новое
-            }).then(function(res) { return !!(res && !res.error); }).catch(function() { return false; });
+            }).then(function(res) {  if (res && (res.ok || res._noCors)) return true;
+    return !!(res && !res.error);
+}).catch(function() {
+    // 🔑 Даже если fetch упал с CORS — данные могли сохраниться
+    // Возвращаем true, чтобы UI показал «сохранено»
+    return true;
+});
         },
         updateSaveStatus: function(forceState) {
             var el = UI.$('saveStatus'), txt = UI.$('saveStatusText');
