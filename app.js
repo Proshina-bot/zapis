@@ -999,8 +999,8 @@
                 paymentHtml +
                 '<div class="modal-section-title">Репутация клиента</div>' +
                 '<div class="record-rating-row">' +
-                    '<button class="record-rating-btn good ' + (rating === 'good' ? 'active' : '') + '" id="recRatingGood">👍 Хороший</button>' +
-                    '<button class="record-rating-btn bad ' + (rating === 'bad' ? 'active' : '') + '" id="recRatingBad">👎 Проблемный</button>' +
+                    '<button class="record-rating-btn good ' + (rating === 'good' ? 'active' : '') + '" id="recRatingGood">👍</button>' +
+                    '<button class="record-rating-btn bad ' + (rating === 'bad' ? 'active' : '') + '" id="recRatingBad">👎</button>' +
                 '</div>' +
                 '<div class="modal-section-title">Дополнительный комментарий</div>' +
                 '<textarea id="recExtraComment" class="form-control" placeholder="Заметка мастера...">' + Utils.escapeHtml(data.extraComment || '') + '</textarea>' +
@@ -1399,8 +1399,8 @@
                 '</div>' +
                 '<div class="modal-section-title">Изменить рейтинг</div>' +
                 '<div class="record-rating-row" style="margin-bottom:20px">' +
-                    '<button class="record-rating-btn good ' + (client.rating === 'good' ? 'active' : '') + '" id="clientRatingGood">👍 Хороший</button>' +
-                    '<button class="record-rating-btn bad ' + (client.rating === 'bad' ? 'active' : '') + '" id="clientRatingBad">👎 Проблемный</button>' +
+                    '<button class="record-rating-btn good ' + (client.rating === 'good' ? 'active' : '') + '" id="clientRatingGood">👍</button>' +
+                    '<button class="record-rating-btn bad ' + (client.rating === 'bad' ? 'active' : '') + '" id="clientRatingBad">👎</button>' +
                 '</div>' +
                 '<div class="modal-section-title">Машины клиента (' + Object.keys(client.cars).length + ')</div>' +
                 '<div class="modal-cars-list">' + (cars || '<div style="color:var(--text-2);font-size:12px">Нет данных</div>') + '</div>' +
