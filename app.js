@@ -997,7 +997,7 @@
                     (data.comment ? '<div class="record-detail-item" style="grid-column:1/-1"><div class="label">Комментарий</div><div class="value small">' + Utils.escapeHtml(data.comment) + '</div></div>' : '') +
                 '</div>' +
                 paymentHtml +
-                '<div class="modal-section-title">Репутация клиента</div>' +
+                '<div class="modal-section-title">Шиномонтаж</div>' +
                 '<div class="record-rating-row">' +
                     '<button class="record-rating-btn good ' + (rating === 'good' ? 'active' : '') + '" id="recRatingGood">👍</button>' +
                     '<button class="record-rating-btn bad ' + (rating === 'bad' ? 'active' : '') + '" id="recRatingBad">👎</button>' +
